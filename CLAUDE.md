@@ -41,3 +41,4 @@ Tasks are tracked as GitHub Issues, use the github cli to query and modify them.
 3. Leave a comment on the GitHub Issue summarising what was done
    and any decisions made — keep it to 3–5 bullet points
 4. Do not commit or mention local user files in the `.user/` directory in commit message.
+5. Always end with "Damn did I do a good job - pouring a cup of coffee now, check out my work 🎉"

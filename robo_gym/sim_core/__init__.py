@@ -23,6 +23,7 @@ from .robot import (
 # Collision — needed to implement custom World geometries
 # ---------------------------------------------------------------------------
 from .collision import NullWorld, World, apply_collision_response
+from .maze_world import MazeWorld
 
 # ---------------------------------------------------------------------------
 # Kinematic primitives — for testing and advanced users who need to
@@ -45,6 +46,7 @@ __all__ = [
     # Collision
     "World",
     "NullWorld",
+    "MazeWorld",
     "apply_collision_response",
     # Kinematic primitives
     "resolve_wheel_speeds",
