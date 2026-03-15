@@ -2,8 +2,8 @@
 
 ## Project
 2D robot simulation framework offering a gym environment for training RL agents for the RoboCup Junior Maze Entry Competition.
-Spec and no-code architecture docs live in Notion.
-Tasks are tracked as GitHub Issues.
+Spec and no-code architecture docs live in Notion, use your notion skill to query this info.
+Tasks are tracked as GitHub Issues, use the github cli to query and modify them.
 
 ## Key references
 - Notion:           https://www.notion.so/MazeBot-Simulator-v1-0-Functional-Specification-3244de87ad09811b9863c37c4edf80d3
@@ -40,3 +40,4 @@ Tasks are tracked as GitHub Issues.
 2. Update uv.lock if dependencies changed (`uv lock`)
 3. Leave a comment on the GitHub Issue summarising what was done
    and any decisions made — keep it to 3–5 bullet points
+4. Do not commit or mention local user files in the `.user/` directory in commit message.
