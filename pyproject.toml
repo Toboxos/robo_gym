@@ -1,0 +1,21 @@
+[project]
+name = "robo_gym"
+version = "0.1.0"
+description = "2D robot simulation framework for RoboCup Junior Maze Entry RL training"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.0",
+    "pygame>=2.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
