@@ -78,11 +78,25 @@ class DrivetrainConfig:
 
 
 @dataclass(frozen=True)
+class SensorConfig:
+    """Physical mounting of one sensor on the robot platform.
+
+    Defines where and how a sensor is anchored to the robot body.  Subclass
+    this to add sensor-type-specific parameters (noise model, range, etc.).
+    """
+
+    name: str                               # identifier for debugging / config
+    position_offset: tuple[float, float]    # metres from robot CoM, body frame (x forward, y left)
+    angle_offset: float                     # radians added to robot heading (CCW positive)
+
+
+@dataclass(frozen=True)
 class RobotConfig:
-    """Full robot configuration combining chassis and drivetrain."""
+    """Full robot configuration combining chassis, drivetrain, and sensors."""
 
     chassis: ChassisConfig = field(default_factory=ChassisConfig)
     drivetrain: DrivetrainConfig = field(default_factory=DrivetrainConfig)
+    sensors: tuple[SensorConfig, ...] = ()  # sensors physically mounted on the platform
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,9 @@ from .robot import (
     NoiseModel,
     RobotConfig,
     RobotState,
+    SensorConfig,
 )
+from .sensor import sensor_world_pose
 
 # ---------------------------------------------------------------------------
 # Collision — needed to implement custom World geometries
@@ -43,6 +45,9 @@ __all__ = [
     "RobotConfig",
     "RobotState",
     "CollisionEvent",
+    "SensorConfig",
+    # Sensor platform
+    "sensor_world_pose",
     # Collision
     "World",
     "NullWorld",
