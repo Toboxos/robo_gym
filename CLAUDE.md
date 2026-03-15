@@ -29,6 +29,12 @@ Tasks are tracked as GitHub Issues.
 2. Check the Notion decision log for relevant prior decisions
 3. Run `uv run pytest` — confirm green baseline before touching anything
 
+## Testing conventions
+- **Test behaviour, not structure.** Only test logic you wrote — conditionals, invariants, transformations. Never test that a `@dataclass` stores a field or that Python's constructor works.
+- **No trivial storage tests.** `assert obj.field == value` right after construction with that value is noise — delete it.
+- **No duplicate tests.** If two tests assert the same thing through slightly different paths, keep the one that exercises the logic most directly and delete the other.
+- **A good test can fail for the right reason.** Before writing a test, ask: *what bug would this catch?* If the answer is "a typo that's instantly visible in the source", skip it.
+
 ## When finishing a task
 1. Ensure `uv run pytest` is green
 2. Update uv.lock if dependencies changed (`uv lock`)
