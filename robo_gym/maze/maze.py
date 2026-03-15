@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from robo_gym.maze.cell import Cell, TileType
 
@@ -55,6 +56,24 @@ class Maze:
                     )
                     return False
         return True
+
+    def save_json(self, path: str | Path) -> None:
+        """Serialize this maze to a .maze.json file at the given path."""
+        from robo_gym.maze.serializer import save
+        save(self, path)
+
+    @classmethod
+    def load_json(cls, path: str | Path) -> Maze:
+        """Deserialize a Maze from a .maze.json file.
+
+        Raises:
+            ValueError: If the file version is unsupported.
+            FileNotFoundError: If path does not exist.
+            json.JSONDecodeError: If the file is not valid JSON.
+            KeyError: If required fields are missing.
+        """
+        from robo_gym.maze.serializer import load
+        return load(path)
 
     def __str__(self) -> str:
         """Render the maze as ASCII art via robo_gym.maze.renderer.render_ascii."""
