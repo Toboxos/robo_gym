@@ -1,13 +1,60 @@
-"""Sensor platform utilities: derive world-frame sensor pose from robot state."""
+"""Sensor platform utilities: world-frame pose, ray cast types, and sensor protocol."""
 
 from __future__ import annotations
 
 import logging
 import math
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Protocol
 
 from .robot import RobotState, SensorConfig
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RayCastHit:
+    """Result of a ray cast query against world geometry.
+
+    ``wall_normal`` is ``None`` when no wall was found within ``max_range``,
+    in which case ``distance`` equals the queried ``max_range``.
+    """
+
+    distance: float                          # metres to hit point
+    wall_normal: tuple[float, float] | None  # outward unit normal at hit; None = miss
+
+
+class Sensor(ABC):
+    """Abstract base class for all stateful sensor instances.
+
+    Each concrete sensor type (ultrasonic, IR, …) inherits from this class
+    and implements :meth:`read`.  Instances are obtained via the corresponding
+    config's :meth:`~robo_gym.sim_core.robot.SensorConfig.construct` factory
+    method.
+    """
+
+    @abstractmethod
+    def read(self, state: RobotState, world: SensorWorld) -> float:
+        """Return a sensor reading given the current robot state and world geometry."""
+        ...
+
+
+class SensorWorld(Protocol):
+    """Geometry provider for sensor ray casting.
+
+    Structurally satisfied by ``MazeWorld`` and ``NullWorld`` without explicit
+    inheritance.
+    """
+
+    def ray_cast(
+        self,
+        origin: tuple[float, float],
+        direction: tuple[float, float],
+        max_range: float,
+    ) -> RayCastHit:
+        """Cast a ray from *origin* along *direction*; return first hit or miss."""
+        ...
 
 
 def sensor_world_pose(

@@ -9,6 +9,7 @@ from itertools import groupby
 from robo_gym.maze.maze import Maze
 
 from .robot import ChassisConfig, CollisionEvent, RobotState
+from .sensor import RayCastHit
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,50 @@ class MazeWorld:
                 events.append(event)
 
         return events
+
+    def ray_cast(
+        self,
+        origin: tuple[float, float],
+        direction: tuple[float, float],
+        max_range: float,
+    ) -> RayCastHit:
+        """Cast a ray from *origin* in *direction*; return first hit within *max_range*.
+
+        Returns ``RayCastHit(max_range, None)`` when no wall is hit.
+        """
+        ox, oy = origin
+        dx, dy = direction
+        min_t = max_range
+        best_normal: tuple[float, float] | None = None
+
+        for wall in self._walls:
+            if wall.is_horizontal:
+                if abs(dy) < 1e-12:
+                    continue
+                t = (wall.fixed_coord - oy) / dy
+                if t <= 0.0:
+                    continue
+                x_hit = ox + t * dx
+                if x_hit < wall.range_min or x_hit > wall.range_max:
+                    continue
+                normal: tuple[float, float] = (0.0, -1.0) if oy < wall.fixed_coord else (0.0, 1.0)
+            else:
+                if abs(dx) < 1e-12:
+                    continue
+                t = (wall.fixed_coord - ox) / dx
+                if t <= 0.0:
+                    continue
+                y_hit = oy + t * dy
+                if y_hit < wall.range_min or y_hit > wall.range_max:
+                    continue
+                normal = (-1.0, 0.0) if ox < wall.fixed_coord else (1.0, 0.0)
+
+            if t < min_t:
+                min_t = t
+                best_normal = normal
+                logger.debug("ray_cast: wall=%s  t=%.4f m", wall.wall_id, t)
+
+        return RayCastHit(distance=min_t, wall_normal=best_normal)
 
     # ------------------------------------------------------------------
     # Internal helpers

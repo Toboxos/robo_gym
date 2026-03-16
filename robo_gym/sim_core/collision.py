@@ -9,6 +9,7 @@ from typing import Protocol
 import numpy as np
 
 from .robot import ChassisConfig, CollisionEvent, RobotState  # ChassisConfig used in World/NullWorld
+from .sensor import RayCastHit
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,15 @@ class NullWorld:
     ) -> list[CollisionEvent]:
         """Always returns an empty list."""
         return []
+
+    def ray_cast(
+        self,
+        origin: tuple[float, float],
+        direction: tuple[float, float],
+        max_range: float,
+    ) -> RayCastHit:
+        """Always returns a miss (open space — no walls)."""
+        return RayCastHit(distance=max_range, wall_normal=None)
 
 
 def apply_collision_response(

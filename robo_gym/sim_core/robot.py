@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .sensor import Sensor
 
 import numpy as np
 
@@ -82,12 +85,21 @@ class SensorConfig:
     """Physical mounting of one sensor on the robot platform.
 
     Defines where and how a sensor is anchored to the robot body.  Subclass
-    this to add sensor-type-specific parameters (noise model, range, etc.).
+    this to add sensor-type-specific parameters (noise model, range, etc.) and
+    override :meth:`construct` to return the corresponding sensor instance.
     """
 
     name: str                               # identifier for debugging / config
     position_offset: tuple[float, float]    # metres from robot CoM, body frame (x forward, y left)
     angle_offset: float                     # radians added to robot heading (CCW positive)
+
+    def construct(self, rng: np.random.Generator | None = None) -> Sensor:
+        """Instantiate a sensor from this configuration.
+
+        Subclasses must override this to return a concrete
+        :class:`~robo_gym.sim_core.sensor.Sensor` instance.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement construct()")
 
 
 @dataclass(frozen=True)

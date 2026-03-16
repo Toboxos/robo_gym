@@ -19,7 +19,8 @@ from .robot import (
     RobotState,
     SensorConfig,
 )
-from .sensor import sensor_world_pose
+from .sensor import RayCastHit, Sensor, SensorWorld, sensor_world_pose
+from .ultrasonic import UltrasonicSensor, UltrasonicSensorConfig
 
 # ---------------------------------------------------------------------------
 # Collision — needed to implement custom World geometries
@@ -48,6 +49,12 @@ __all__ = [
     "SensorConfig",
     # Sensor platform
     "sensor_world_pose",
+    "Sensor",
+    "RayCastHit",
+    "SensorWorld",
+    # Ultrasonic sensor
+    "UltrasonicSensorConfig",
+    "UltrasonicSensor",
     # Collision
     "World",
     "NullWorld",
