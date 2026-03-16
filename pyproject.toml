@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "2D robot simulation framework for RoboCup Junior Maze Entry RL training"
 requires-python = ">=3.13"
 dependencies = [
+    "gymnasium>=0.29",
     "matplotlib>=3.10.8",
     "numpy>=2.0",
     "pygame>=2.6",
