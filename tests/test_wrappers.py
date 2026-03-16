@@ -10,6 +10,7 @@ import pytest
 from robo_gym.env.maze_env import MazeEnv
 from robo_gym.env.realtime_wrapper import RealtimeWrapper
 from robo_gym.env.render_wrapper import RenderWrapper
+from robo_gym.env.reward import RewardConfig
 from robo_gym.env.substep_wrapper import SubStepWrapper
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.robot import RobotConfig
@@ -67,6 +68,67 @@ class TestSubStepWrapperTruncation:
         env.reset()
         _, _, _, truncated, _ = env.step(_ZERO)
         assert not truncated
+
+
+class TestSubStepWrapperReward:
+    def test_reward_is_sum_of_substep_rewards(self) -> None:
+        """Reward returned by SubStepWrapper must be the sum over all substeps.
+
+        With velocity reward enabled and full-forward action, each substep yields
+        a positive reward.  10 substeps must accumulate to more than 1 substep.
+        """
+        n_substeps = 10
+        physics_dt = 0.01
+        base = MazeEnv(
+            RobotConfig(),
+            Maze.blank(3, 3),
+            cell_size=0.3,
+            dt=physics_dt,
+            reward_config=RewardConfig(w_velocity=1.0, w_explore=0.0, w_action_smooth=0.0),
+        )
+        single = MazeEnv(
+            RobotConfig(),
+            Maze.blank(3, 3),
+            cell_size=0.3,
+            dt=physics_dt,
+            reward_config=RewardConfig(w_velocity=1.0, w_explore=0.0, w_action_smooth=0.0),
+        )
+        wrapped = SubStepWrapper(base, control_dt=physics_dt * n_substeps)
+        wrapped.reset()
+        single.reset()
+
+        action = np.array([1.0, 1.0], dtype=np.float32)
+        _, wrapped_reward, _, _, wrapped_info = wrapped.step(action)
+
+        single_rewards = []
+        for _ in range(n_substeps):
+            _, r, _, _, _ = single.step(action)
+            single_rewards.append(r)
+
+        assert wrapped_reward == pytest.approx(sum(single_rewards), rel=1e-6)
+
+    def test_info_components_are_summed_across_substeps(self) -> None:
+        """Numeric info values (r_velocity, r_explore, r_action_smooth) must be summed.
+
+        With all weights=1.0 the total reward equals the sum of the three raw
+        components, so we can verify accumulation via a single identity check.
+        """
+        base = MazeEnv(
+            RobotConfig(),
+            Maze.blank(3, 3),
+            cell_size=0.3,
+            dt=0.01,
+            reward_config=RewardConfig(w_velocity=1.0, w_explore=1.0, w_action_smooth=1.0),
+        )
+        env = SubStepWrapper(base, control_dt=0.05)  # 5 substeps
+        env.reset()
+        action = np.array([1.0, 1.0], dtype=np.float32)
+        _, reward, _, _, info = env.step(action)
+        # With unit weights: reward == sum(components) accumulated over all substeps.
+        assert reward == pytest.approx(
+            info["r_velocity"] + info["r_explore"] + info["r_action_smooth"],
+            rel=1e-6,
+        )
 
 
 class TestSubStepWrapperDiagnostics:

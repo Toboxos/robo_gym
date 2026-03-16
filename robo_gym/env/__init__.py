@@ -4,5 +4,12 @@ from .maze_env import MazeEnv
 from .render_wrapper import RenderWrapper
 from .substep_wrapper import SubStepWrapper
 from .realtime_wrapper import RealtimeWrapper
+from .reward import RewardConfig
 
-__all__ = ["MazeEnv", "RenderWrapper", "SubStepWrapper", "RealtimeWrapper"]
+__all__ = [
+    "MazeEnv", 
+    "RenderWrapper", 
+    "SubStepWrapper", 
+    "RealtimeWrapper", 
+    "RewardConfig"
+]

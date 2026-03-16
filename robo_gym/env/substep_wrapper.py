@@ -106,7 +106,14 @@ class SubStepWrapper(gymnasium.Wrapper):
         n_taken = 0
 
         for _ in range(self._n_substeps):
-            obs, reward, terminated, truncated, info = self.env.step(action)
+            obs, step_reward, terminated, truncated, step_info = self.env.step(action)
+            reward += step_reward
+            # Accumulate numeric info values (e.g. reward components) across substeps.
+            for k, v in step_info.items():
+                if isinstance(v, (int, float)):
+                    info[k] = info.get(k, 0.0) + v
+                else:
+                    info[k] = v
             n_taken += 1
             if terminated or truncated:
                 break

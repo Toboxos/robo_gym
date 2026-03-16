@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import gymnasium
 
+from robo_gym.env.reward import RewardConfig
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.engine import PhysicsEngine
 from robo_gym.sim_core.maze_world import MazeWorld
@@ -43,7 +44,10 @@ class MazeEnv(gymnasium.Env):
     ``robot_config.sensors``.  Lower bound is always 0; upper bound is
     ``sensor_config.max_range`` when the attribute exists, otherwise ``inf``.
 
-    **Reward**: Always ``0.0`` (placeholder for future task-specific rewards).
+    **Reward**: Weighted sum of two components (see :class:`RewardConfig`):
+
+    - *velocity*: normalised forward speed in ``[0, 1]`` (backward motion clipped to 0).
+    - *explore*: ``1.0`` the first time the robot enters each maze cell; ``0.0`` thereafter.
     """
 
     metadata: dict[str, Any] = {"render_modes": ["human", "rgb_array"]}
@@ -58,6 +62,7 @@ class MazeEnv(gymnasium.Env):
         rng_seed: int | None = None,
         render_mode: str | None = None,
         renderer_config: Any | None = None,
+        reward_config: RewardConfig | None = None,
     ) -> None:
         """Initialise the environment.
 
@@ -74,6 +79,8 @@ class MazeEnv(gymnasium.Env):
             renderer_config:  Optional :class:`robo_gym.ui.renderer.RendererConfig`
                               instance to customise the renderer.  Defaults are used
                               when ``None``.
+            reward_config:    Optional :class:`RewardConfig` controlling reward weights.
+                              Defaults to ``RewardConfig()`` when ``None``.
         """
         super().__init__()
 
@@ -123,10 +130,14 @@ class MazeEnv(gymnasium.Env):
             dtype=np.float32,
         )
 
+        self._reward_config: RewardConfig = reward_config or RewardConfig()
+
         # Episode state — initialised properly in reset().
         self._state: RobotState = RobotState()
         self._step_count: int = 0
         self._trajectory: list[tuple[float, float]] = []
+        self._visited_cells: set[tuple[int, int]] = set()
+        self._prev_action: np.ndarray = np.zeros(2, dtype=np.float32)
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -154,6 +165,8 @@ class MazeEnv(gymnasium.Env):
         self._step_count = 0
         self._trajectory.clear()
         self._trajectory.append((self._state.x, self._state.y))
+        self._visited_cells = {self._current_cell()}
+        self._prev_action = np.zeros(2, dtype=np.float32)
 
         return self._get_obs(), {}
 
@@ -180,12 +193,13 @@ class MazeEnv(gymnasium.Env):
         self._trajectory.append((self._state.x, self._state.y))
 
         obs = self._get_obs()
-        reward = 0.0
+        reward, reward_info = self._compute_reward(action)
+
         terminated = False
         truncated = (
             self._max_steps is not None and self._step_count >= self._max_steps
         )
-        return obs, reward, terminated, truncated, {}
+        return obs, reward, terminated, truncated, reward_info
 
     def render(self) -> np.ndarray | None:
         """Render the current simulation state.
@@ -220,6 +234,57 @@ class MazeEnv(gymnasium.Env):
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _compute_reward(self, action: np.ndarray) -> tuple[float, dict[str, float]]:
+        """Compute the reward for the current step and update episode reward state.
+
+        Must be called once per step, after the physics engine has advanced
+        ``_state``, because it reads the new velocity and position and updates
+        ``_visited_cells`` and ``_prev_action`` as side effects.
+
+        Returns:
+            A ``(reward, info)`` pair where ``info`` contains the raw (unweighted)
+            value of each component for logging purposes.
+        """
+        # Forward velocity reward (normalised to [0, 1]).
+        max_speed = self._robot_config.drivetrain.max_speed
+        v_fwd = (
+            self._state.vx * math.cos(self._state.theta)
+            + self._state.vy * math.sin(self._state.theta)
+        )
+        r_velocity = max(0.0, v_fwd) / max_speed
+
+        # Exploration reward — fires once per cell per episode.
+        cell = self._current_cell()
+        if cell not in self._visited_cells:
+            self._visited_cells.add(cell)
+            r_explore = 1.0
+        else:
+            r_explore = 0.0
+
+        # Action-smoothness penalty — penalises abrupt motor changes.
+        # delta per motor is in [-2, 2]; mean absolute delta normalised to [-1, 0].
+        delta = action.astype(np.float32) - self._prev_action
+        r_action_smooth = -float(np.mean(np.abs(delta))) / 2.0
+        self._prev_action = action.astype(np.float32)
+
+        cfg = self._reward_config
+        reward = (
+            cfg.w_velocity * r_velocity
+            + cfg.w_explore * r_explore
+            + cfg.w_action_smooth * r_action_smooth
+        )
+        return reward, {
+            "r_velocity": r_velocity,
+            "r_explore": r_explore,
+            "r_action_smooth": r_action_smooth,
+        }
+
+    def _current_cell(self) -> tuple[int, int]:
+        """Return the maze grid cell the robot currently occupies."""
+        cx = int(self._state.x / self._cell_size)
+        cy = int(self._state.y / self._cell_size)
+        return cx, cy
 
     def _initial_state(self) -> RobotState:
         """Derive the start RobotState from maze.start and maze.start_heading."""

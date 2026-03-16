@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from robo_gym.env import MazeEnv
+from robo_gym.env.reward import RewardConfig
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.robot import RobotConfig
 from robo_gym.sim_core.ultrasonic import UltrasonicSensorConfig
@@ -151,13 +152,12 @@ class TestStep:
         assert isinstance(truncated, bool)
         assert isinstance(info, dict)
 
-    def test_reward_always_zero(self) -> None:
-        """Reward is 0.0 regardless of action."""
+    def test_reward_is_float(self) -> None:
+        """Reward returned by step() is a float."""
         env = _env(sensors=(_us(),))
         env.reset()
-        for _ in range(5):
-            _, reward, _, _, _ = env.step(env.action_space.sample())
-        assert reward == pytest.approx(0.0)
+        _, reward, _, _, _ = env.step(np.zeros(2, dtype=np.float32))
+        assert isinstance(reward, float)
 
     def test_terminated_always_false(self) -> None:
         """terminated flag is never set (no goal states implemented yet)."""
@@ -260,3 +260,142 @@ class TestDeterminism:
             obs_a, _, _, _, _ = env_a.step(action)
             obs_b, _, _, _, _ = env_b.step(action)
             np.testing.assert_array_equal(obs_a, obs_b)
+
+
+# ---------------------------------------------------------------------------
+# Reward functions
+# ---------------------------------------------------------------------------
+
+_FORWARD = np.array([1.0, 1.0], dtype=np.float32)
+_STOPPED = np.array([0.0, 0.0], dtype=np.float32)
+_SPIN    = np.array([1.0, -1.0], dtype=np.float32)
+
+
+def _reward_env(w_velocity: float = 1.0, w_explore: float = 0.0) -> MazeEnv:
+    """Env with explicit reward weights for isolated component testing."""
+    return MazeEnv(
+        robot_config=RobotConfig(),
+        maze=_blank_maze("E"),
+        cell_size=_CELL_SIZE,
+        rng_seed=0,
+        reward_config=RewardConfig(w_velocity=w_velocity, w_explore=w_explore),
+    )
+
+
+class TestReward:
+    def test_info_contains_reward_components(self) -> None:
+        """step() info dict exposes r_velocity and r_explore keys."""
+        env = _reward_env()
+        env.reset()
+        _, _, _, _, info = env.step(_STOPPED)
+        assert "r_velocity" in info
+        assert "r_explore" in info
+
+    def test_velocity_reward_positive_when_driving_forward(self) -> None:
+        """Forward motion produces a positive velocity reward component."""
+        env = _reward_env(w_velocity=1.0, w_explore=0.0)
+        env.reset()
+        _, reward, _, _, info = env.step(_FORWARD)
+        assert info["r_velocity"] > 0.0
+        assert reward > 0.0
+
+    def test_velocity_reward_zero_when_stopped(self) -> None:
+        """Zero motor power yields zero velocity reward."""
+        env = _reward_env(w_velocity=1.0, w_explore=0.0)
+        env.reset()
+        _, _, _, _, info = env.step(_STOPPED)
+        assert info["r_velocity"] == pytest.approx(0.0)
+
+    def test_velocity_reward_zero_when_spinning(self) -> None:
+        """Pure rotation (equal and opposite motors) yields near-zero velocity reward.
+
+        The robot barely translates, so r_velocity should be negligible.
+        We take step 2 to avoid any first-step exploration bonus contaminating
+        the reward (exploration weight is set to 0 here anyway).
+        """
+        env = _reward_env(w_velocity=1.0, w_explore=0.0)
+        env.reset()
+        env.step(_SPIN)  # step 1 — consume start-cell exploration
+        _, _, _, _, info = env.step(_SPIN)  # step 2
+        assert info["r_velocity"] == pytest.approx(0.0, abs=0.05)
+
+    def test_velocity_reward_normalised_at_most_one(self) -> None:
+        """r_velocity is capped at 1.0 (normalised by max_speed)."""
+        env = _reward_env(w_velocity=1.0, w_explore=0.0)
+        env.reset()
+        for _ in range(20):
+            _, _, _, _, info = env.step(_FORWARD)
+            assert info["r_velocity"] <= 1.0 + 1e-9
+
+    def test_exploration_bonus_fires_once_per_cell(self) -> None:
+        """Entering a new cell gives r_explore=1.0; revisiting gives 0.0.
+
+        The 3×3 maze has no internal walls, so the robot can drive East from
+        cell (0,0) into cell (1,0).  At max_speed=0.3 m/s and dt=0.05 s the
+        robot covers ~0.015 m per step; 15 steps clears the 0.15 m gap.
+        """
+        env = _reward_env(w_velocity=0.0, w_explore=1.0)
+        env.reset()
+
+        # Drive East until we've seen an exploration bonus.
+        crossed = False
+        for _ in range(30):
+            _, _, _, _, info = env.step(_FORWARD)
+            if info["r_explore"] == pytest.approx(1.0):
+                crossed = True
+                break
+        assert crossed, "Robot never crossed into a new cell"
+
+        # Additional steps in the same cell should yield no further bonus.
+        _, _, _, _, info = env.step(_STOPPED)
+        assert info["r_explore"] == pytest.approx(0.0)
+
+    def test_exploration_resets_on_env_reset(self) -> None:
+        """After env.reset(), only the start cell is in _visited_cells."""
+        env = _reward_env(w_velocity=0.0, w_explore=1.0)
+        env.reset()
+
+        # Drive East to visit a second cell.
+        for _ in range(30):
+            env.step(_FORWARD)
+
+        assert len(env._visited_cells) > 1
+
+        env.reset()
+        assert env._visited_cells == {env._current_cell()}
+
+    def test_action_smooth_penalty_on_sudden_change(self) -> None:
+        """Jumping from stopped to full-forward produces a negative smooth penalty."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=_blank_maze("E"),
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+            reward_config=RewardConfig(w_velocity=0.0, w_explore=0.0, w_action_smooth=1.0),
+        )
+        env.reset()  # prev_action initialised to [0, 0]
+        _, _, _, _, info = env.step(_FORWARD)  # jump to [1, 1]
+        assert info["r_action_smooth"] < 0.0
+
+    def test_action_smooth_penalty_zero_for_repeated_action(self) -> None:
+        """Repeating the same action yields r_action_smooth == 0."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=_blank_maze("E"),
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+            reward_config=RewardConfig(w_velocity=0.0, w_explore=0.0, w_action_smooth=1.0),
+        )
+        env.reset()
+        env.step(_FORWARD)  # establishes prev_action = [1, 1]
+        _, _, _, _, info = env.step(_FORWARD)  # no change
+        assert info["r_action_smooth"] == pytest.approx(0.0)
+
+    def test_action_smooth_penalty_bounded(self) -> None:
+        """r_action_smooth is always in [-1, 0]."""
+        env = _reward_env(w_velocity=0.0, w_explore=0.0)
+        env.reset()
+        actions = [_FORWARD, _STOPPED, _SPIN, _FORWARD, _STOPPED]
+        for action in actions:
+            _, _, _, _, info = env.step(action)
+            assert -1.0 - 1e-9 <= info["r_action_smooth"] <= 0.0 + 1e-9
