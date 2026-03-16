@@ -8,7 +8,14 @@ from typing import Any
 import numpy as np
 import gymnasium
 
-from robo_gym.env.reward import RewardConfig
+from robo_gym.env.reward import (
+    ActionSmoothReward,
+    ExploreReward,
+    RewardComponent,
+    RewardContext,
+    VelocityReward,
+    WallFollowReward,
+)
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.engine import PhysicsEngine
 from robo_gym.sim_core.maze_world import MazeWorld
@@ -44,10 +51,10 @@ class MazeEnv(gymnasium.Env):
     ``robot_config.sensors``.  Lower bound is always 0; upper bound is
     ``sensor_config.max_range`` when the attribute exists, otherwise ``inf``.
 
-    **Reward**: Weighted sum of two components (see :class:`RewardConfig`):
-
-    - *velocity*: normalised forward speed in ``[0, 1]`` (backward motion clipped to 0).
-    - *explore*: ``1.0`` the first time the robot enters each maze cell; ``0.0`` thereafter.
+    **Reward**: Weighted sum of :class:`~robo_gym.env.reward.RewardComponent`
+    instances.  Pass ``reward_components`` to inject custom components, or use
+    the convenience ``reward_config`` parameter for built-in weights.  Each
+    component's raw value is also exposed in the step info dict.
     """
 
     metadata: dict[str, Any] = {"render_modes": ["human", "rgb_array"]}
@@ -62,25 +69,27 @@ class MazeEnv(gymnasium.Env):
         rng_seed: int | None = None,
         render_mode: str | None = None,
         renderer_config: Any | None = None,
-        reward_config: RewardConfig | None = None,
+        reward_components: list[RewardComponent] | None = None,
     ) -> None:
         """Initialise the environment.
 
         Args:
-            robot_config:     Full robot configuration (chassis, drivetrain, sensors).
-            maze:             Maze defining the world geometry and start pose.
-            cell_size:        Side length of one maze cell in metres.
-            dt:               Simulation tick duration in seconds.
-            max_steps:        Episode length limit.  ``None`` means no limit.
-            rng_seed:         Seed for the sensor noise RNG.  Pass an integer for
-                              reproducible episodes; ``None`` uses OS entropy.
-            render_mode:      ``"human"`` for a live PyGame window, ``"rgb_array"``
-                              for an off-screen RGB array, or ``None`` (no rendering).
-            renderer_config:  Optional :class:`robo_gym.ui.renderer.RendererConfig`
-                              instance to customise the renderer.  Defaults are used
-                              when ``None``.
-            reward_config:    Optional :class:`RewardConfig` controlling reward weights.
-                              Defaults to ``RewardConfig()`` when ``None``.
+            robot_config:       Full robot configuration (chassis, drivetrain, sensors).
+            maze:               Maze defining the world geometry and start pose.
+            cell_size:          Side length of one maze cell in metres.
+            dt:                 Simulation tick duration in seconds.
+            max_steps:          Episode length limit.  ``None`` means no limit.
+            rng_seed:           Seed for the sensor noise RNG.  Pass an integer for
+                                reproducible episodes; ``None`` uses OS entropy.
+            render_mode:        ``"human"`` for a live PyGame window, ``"rgb_array"``
+                                for an off-screen RGB array, or ``None`` (no rendering).
+            renderer_config:    Optional :class:`robo_gym.ui.renderer.RendererConfig`
+                                instance to customise the renderer.  Defaults are used
+                                when ``None``.
+            reward_components:  List of :class:`RewardComponent` instances that define
+                                the reward signal.  Defaults to
+                                ``[VelocityReward(), ExploreReward(), ActionSmoothReward()]``
+                                when ``None``.
         """
         super().__init__()
 
@@ -130,7 +139,18 @@ class MazeEnv(gymnasium.Env):
             dtype=np.float32,
         )
 
-        self._reward_config: RewardConfig = reward_config or RewardConfig()
+        # Resolve the active component list.
+        self._reward_components: list[RewardComponent] = (
+            reward_components
+            if reward_components is not None
+            else [VelocityReward(), ExploreReward(), ActionSmoothReward()]
+        )
+
+        # Validate WallFollowReward sensor names at construction time.
+        sensor_names = [sc.name for sc in robot_config.sensors]
+        for component in self._reward_components:
+            if isinstance(component, WallFollowReward) and component.weight != 0.0:
+                component.validate(sensor_names)
 
         # Episode state — initialised properly in reset().
         self._state: RobotState = RobotState()
@@ -193,7 +213,7 @@ class MazeEnv(gymnasium.Env):
         self._trajectory.append((self._state.x, self._state.y))
 
         obs = self._get_obs()
-        reward, reward_info = self._compute_reward(action)
+        reward, reward_info = self._compute_reward(action, obs)
 
         terminated = False
         truncated = (
@@ -235,50 +255,41 @@ class MazeEnv(gymnasium.Env):
     # Internals
     # ------------------------------------------------------------------
 
-    def _compute_reward(self, action: np.ndarray) -> tuple[float, dict[str, float]]:
-        """Compute the reward for the current step and update episode reward state.
+    def _compute_reward(self, action: np.ndarray, obs: np.ndarray) -> tuple[float, dict[str, float]]:
+        """Compute the reward for the current step.
 
-        Must be called once per step, after the physics engine has advanced
-        ``_state``, because it reads the new velocity and position and updates
-        ``_visited_cells`` and ``_prev_action`` as side effects.
+        Updates ``_visited_cells`` and ``_prev_action`` as side effects, then
+        builds a :class:`~robo_gym.env.reward.RewardContext` and calls each
+        component.  The info dict contains the raw (unweighted) value for every
+        component, keyed by the string each component returns.
 
         Returns:
-            A ``(reward, info)`` pair where ``info`` contains the raw (unweighted)
-            value of each component for logging purposes.
+            A ``(total_reward, info)`` pair.
         """
-        # Forward velocity reward (normalised to [0, 1]).
-        max_speed = self._robot_config.drivetrain.max_speed
-        v_fwd = (
-            self._state.vx * math.cos(self._state.theta)
-            + self._state.vy * math.sin(self._state.theta)
-        )
-        r_velocity = max(0.0, v_fwd) / max_speed
-
-        # Exploration reward — fires once per cell per episode.
+        # Resolve exploration flag and update visited set before building context.
         cell = self._current_cell()
-        if cell not in self._visited_cells:
+        is_new_cell = cell not in self._visited_cells
+        if is_new_cell:
             self._visited_cells.add(cell)
-            r_explore = 1.0
-        else:
-            r_explore = 0.0
 
-        # Action-smoothness penalty — penalises abrupt motor changes.
-        # delta per motor is in [-2, 2]; mean absolute delta normalised to [-1, 0].
-        delta = action.astype(np.float32) - self._prev_action
-        r_action_smooth = -float(np.mean(np.abs(delta))) / 2.0
-        self._prev_action = action.astype(np.float32)
-
-        cfg = self._reward_config
-        reward = (
-            cfg.w_velocity * r_velocity
-            + cfg.w_explore * r_explore
-            + cfg.w_action_smooth * r_action_smooth
+        ctx = RewardContext(
+            state=self._state,
+            obs=obs,
+            action=action.astype(np.float32),
+            prev_action=self._prev_action,
+            is_new_cell=is_new_cell,
+            robot_config=self._robot_config,
         )
-        return reward, {
-            "r_velocity": r_velocity,
-            "r_explore": r_explore,
-            "r_action_smooth": r_action_smooth,
-        }
+
+        total = 0.0
+        info: dict[str, float] = {}
+        for component in self._reward_components:
+            raw, key = component(ctx)
+            info[key] = raw
+            total += component.weight * raw
+
+        self._prev_action = action.astype(np.float32)
+        return total, info
 
     def _current_cell(self) -> tuple[int, int]:
         """Return the maze grid cell the robot currently occupies."""

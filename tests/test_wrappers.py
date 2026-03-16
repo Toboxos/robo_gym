@@ -10,7 +10,7 @@ import pytest
 from robo_gym.env.maze_env import MazeEnv
 from robo_gym.env.realtime_wrapper import RealtimeWrapper
 from robo_gym.env.render_wrapper import RenderWrapper
-from robo_gym.env.reward import RewardConfig
+from robo_gym.env.reward import ActionSmoothReward, ExploreReward, VelocityReward
 from robo_gym.env.substep_wrapper import SubStepWrapper
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.robot import RobotConfig
@@ -84,14 +84,14 @@ class TestSubStepWrapperReward:
             Maze.blank(3, 3),
             cell_size=0.3,
             dt=physics_dt,
-            reward_config=RewardConfig(w_velocity=1.0, w_explore=0.0, w_action_smooth=0.0),
+            reward_components=[VelocityReward(weight=1.0)],
         )
         single = MazeEnv(
             RobotConfig(),
             Maze.blank(3, 3),
             cell_size=0.3,
             dt=physics_dt,
-            reward_config=RewardConfig(w_velocity=1.0, w_explore=0.0, w_action_smooth=0.0),
+            reward_components=[VelocityReward(weight=1.0)],
         )
         wrapped = SubStepWrapper(base, control_dt=physics_dt * n_substeps)
         wrapped.reset()
@@ -118,7 +118,7 @@ class TestSubStepWrapperReward:
             Maze.blank(3, 3),
             cell_size=0.3,
             dt=0.01,
-            reward_config=RewardConfig(w_velocity=1.0, w_explore=1.0, w_action_smooth=1.0),
+            reward_components=[VelocityReward(weight=1.0), ExploreReward(weight=1.0), ActionSmoothReward(weight=1.0)],
         )
         env = SubStepWrapper(base, control_dt=0.05)  # 5 substeps
         env.reset()
