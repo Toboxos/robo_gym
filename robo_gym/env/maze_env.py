@@ -46,7 +46,7 @@ class MazeEnv(gymnasium.Env):
     **Reward**: Always ``0.0`` (placeholder for future task-specific rewards).
     """
 
-    metadata: dict[str, Any] = {"render_modes": []}
+    metadata: dict[str, Any] = {"render_modes": ["human", "rgb_array"]}
 
     def __init__(
         self,
@@ -56,25 +56,41 @@ class MazeEnv(gymnasium.Env):
         dt: float = 0.05,
         max_steps: int | None = None,
         rng_seed: int | None = None,
+        render_mode: str | None = None,
+        renderer_config: Any | None = None,
     ) -> None:
         """Initialise the environment.
 
         Args:
-            robot_config: Full robot configuration (chassis, drivetrain, sensors).
-            maze:         Maze defining the world geometry and start pose.
-            cell_size:    Side length of one maze cell in metres.
-            dt:           Simulation tick duration in seconds.
-            max_steps:    Episode length limit.  ``None`` means no limit.
-            rng_seed:     Seed for the sensor noise RNG.  Pass an integer for
-                          reproducible episodes; ``None`` uses OS entropy.
+            robot_config:     Full robot configuration (chassis, drivetrain, sensors).
+            maze:             Maze defining the world geometry and start pose.
+            cell_size:        Side length of one maze cell in metres.
+            dt:               Simulation tick duration in seconds.
+            max_steps:        Episode length limit.  ``None`` means no limit.
+            rng_seed:         Seed for the sensor noise RNG.  Pass an integer for
+                              reproducible episodes; ``None`` uses OS entropy.
+            render_mode:      ``"human"`` for a live PyGame window, ``"rgb_array"``
+                              for an off-screen RGB array, or ``None`` (no rendering).
+            renderer_config:  Optional :class:`robo_gym.ui.renderer.RendererConfig`
+                              instance to customise the renderer.  Defaults are used
+                              when ``None``.
         """
         super().__init__()
+
+        if render_mode not in (None, *self.metadata["render_modes"]):
+            raise ValueError(
+                f"render_mode {render_mode!r} is not supported. "
+                f"Choose from {self.metadata['render_modes']!r}."
+            )
 
         self._robot_config = robot_config
         self._maze = maze
         self._cell_size = cell_size
         self._dt = dt
         self._max_steps = max_steps
+        self.render_mode = render_mode
+        self._renderer_config = renderer_config
+        self._renderer: Any | None = None
 
         # Episode-invariant objects built once.
         self._world = MazeWorld(maze, cell_size)
@@ -110,6 +126,7 @@ class MazeEnv(gymnasium.Env):
         # Episode state — initialised properly in reset().
         self._state: RobotState = RobotState()
         self._step_count: int = 0
+        self._trajectory: list[tuple[float, float]] = []
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -135,6 +152,8 @@ class MazeEnv(gymnasium.Env):
 
         self._state = self._initial_state()
         self._step_count = 0
+        self._trajectory.clear()
+        self._trajectory.append((self._state.x, self._state.y))
 
         return self._get_obs(), {}
 
@@ -158,6 +177,7 @@ class MazeEnv(gymnasium.Env):
 
         self._state = self._engine.step(self._state, v_left, v_right, self._dt)
         self._step_count += 1
+        self._trajectory.append((self._state.x, self._state.y))
 
         obs = self._get_obs()
         reward = 0.0
@@ -166,6 +186,36 @@ class MazeEnv(gymnasium.Env):
             self._max_steps is not None and self._step_count >= self._max_steps
         )
         return obs, reward, terminated, truncated, {}
+
+    def render(self) -> np.ndarray | None:
+        """Render the current simulation state.
+
+        Returns:
+            An ``(H, W, 3)`` uint8 RGB array for ``render_mode='rgb_array'``;
+            ``None`` for ``render_mode='human'`` (display updated in-place) or
+            when no render mode is set.
+        """
+        if self.render_mode is None:
+            return None
+        if self._renderer is None:
+            from robo_gym.ui.renderer import RendererConfig, SimRenderer
+            cfg = self._renderer_config or RendererConfig()
+            self._renderer = SimRenderer(
+                maze=self._maze,
+                cell_size=self._cell_size,
+                robot_config=self._robot_config,
+                sensors=self._sensors,
+                dt=self._dt,
+                config=cfg,
+                render_mode=self.render_mode,
+            )
+        return self._renderer.render(self._state, self._world, self._trajectory)
+
+    def close(self) -> None:
+        """Tear down the renderer and release all PyGame resources."""
+        if self._renderer is not None:
+            self._renderer.close()
+            self._renderer = None
 
     # ------------------------------------------------------------------
     # Internals

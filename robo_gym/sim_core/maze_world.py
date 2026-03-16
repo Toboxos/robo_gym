@@ -148,6 +148,11 @@ class MazeWorld:
             len(self._walls), maze.width, maze.height, cell_size,
         )
 
+    @property
+    def walls(self) -> list[_WallSegment]:
+        """Read-only wall segments for rendering."""
+        return self._walls
+
     def detect_collisions(
         self,
         state: RobotState,
