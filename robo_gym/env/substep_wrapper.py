@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import gymnasium
@@ -107,7 +107,7 @@ class SubStepWrapper(gymnasium.Wrapper):
 
         for _ in range(self._n_substeps):
             obs, step_reward, terminated, truncated, step_info = self.env.step(action)
-            reward += step_reward
+            reward += float(step_reward)
             # Accumulate numeric info values (e.g. reward components) across substeps.
             for k, v in step_info.items():
                 if isinstance(v, (int, float)):
@@ -130,4 +130,4 @@ class SubStepWrapper(gymnasium.Wrapper):
             # n_substeps == 0: misconfigured control_dt < physics_dt.
             obs = self.env.unwrapped._get_obs()  # type: ignore[union-attr]
 
-        return obs, reward, terminated, truncated, info
+        return cast(np.ndarray, obs), reward, terminated, truncated, info

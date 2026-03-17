@@ -35,6 +35,9 @@ class RewardContext:
     is_new_cell: bool
     """True if the robot entered a maze cell it had not visited this episode."""
 
+    has_collision: bool
+    """True if the physics engine detected at least one wall contact this step."""
+
     robot_config: RobotConfig
     """Full robot configuration, including drivetrain and sensors."""
 
@@ -59,8 +62,10 @@ class RewardComponent(Protocol):
                 return min(1.0, dist * self.scale), "r_progress"
     """
 
-    weight: float
-    """Scalar multiplier applied to the raw component value."""
+    @property
+    def weight(self) -> float:
+        """Scalar multiplier applied to the raw component value."""
+        ...
 
     def __call__(self, ctx: RewardContext) -> tuple[float, str]:
         """Compute one reward signal for a single step.
@@ -116,33 +121,17 @@ class ActionSmoothReward:
 
 
 @dataclass(frozen=True)
-class WallFollowReward:
-    """Penalty in ``[-1, 0]`` for deviating from a target side-wall distance.
+class WallCollisionPenalty:
+    """Fixed penalty of ``-1.0`` whenever the robot physically contacts a wall.
 
-    Returns ``0.0`` when the named sensor reads at ``max_range`` (opening, no
-    wall to follow) so the robot is not penalised for gaps.
+    Relies on ``RewardContext.has_collision``, which is set by ``MazeEnv``
+    from the physics engine's collision events.  Unlike sensor-based proxies
+    (e.g. ``WallAheadPenalty``), this fires on actual geometric penetration,
+    so it is robust to sensor placement and robot heading.
     """
 
-    weight: float = 1.0
-    sensor_name: str = "right"
-    target_dist: float = 0.15
+    weight: float = 2.0
 
     def __call__(self, ctx: RewardContext) -> tuple[float, str]:
-        """Compute deviation penalty from the target wall distance."""
-        for i, sc in enumerate(ctx.robot_config.sensors):
-            if sc.name == self.sensor_name:
-                d = float(ctx.obs[i])
-                max_range = getattr(sc, "max_range", float("inf"))
-                if d < max_range:
-                    deviation = abs(d - self.target_dist)
-                    return -min(1.0, deviation / self.target_dist), "r_wall_follow"
-                return 0.0, "r_wall_follow"
-        return 0.0, "r_wall_follow"
-
-    def validate(self, sensor_names: list[str]) -> None:
-        """Raise ``ValueError`` if ``sensor_name`` is absent from ``sensor_names``."""
-        if self.sensor_name not in sensor_names:
-            raise ValueError(
-                f"wall_follow_sensor {self.sensor_name!r} not found in robot "
-                f"sensors {sensor_names!r}."
-            )
+        """Return ``-1.0`` on a collision step, ``0.0`` otherwise."""
+        return (-1.0 if ctx.has_collision else 0.0), "r_wall_collision"

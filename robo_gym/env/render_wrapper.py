@@ -60,10 +60,10 @@ class RenderWrapper(gymnasium.Wrapper):
             Standard ``(obs, reward, terminated, truncated, info)`` tuple.
         """
         t0 = time.perf_counter()
-        result = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         t1 = time.perf_counter()
         self.last_step_ms = (t1 - t0) * 1e3
-       
+
         self.last_render_ms = 0.0
         now = time.perf_counter()
 
@@ -78,7 +78,7 @@ class RenderWrapper(gymnasium.Wrapper):
                 self.last_step_ms, self.last_render_ms,
             )
 
-        return result
+        return obs, float(reward), terminated, truncated, info
 
     def render(self):
         return 

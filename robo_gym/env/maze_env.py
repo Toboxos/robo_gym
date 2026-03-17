@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import gymnasium
@@ -14,7 +14,6 @@ from robo_gym.env.reward import (
     RewardComponent,
     RewardContext,
     VelocityReward,
-    WallFollowReward,
 )
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.engine import PhysicsEngine
@@ -70,6 +69,7 @@ class MazeEnv(gymnasium.Env):
         render_mode: str | None = None,
         renderer_config: Any | None = None,
         reward_components: list[RewardComponent] | None = None,
+        maze_factory: Callable[[int], Maze] | None = None,
     ) -> None:
         """Initialise the environment.
 
@@ -90,6 +90,11 @@ class MazeEnv(gymnasium.Env):
                                 the reward signal.  Defaults to
                                 ``[VelocityReward(), ExploreReward(), ActionSmoothReward()]``
                                 when ``None``.
+            maze_factory:       Optional callable ``(seed: int) -> Maze``.  When set,
+                                ``reset()`` calls this factory with a derived seed on
+                                every episode to install a freshly generated maze.
+                                When ``None`` (default), the maze passed at construction
+                                is reused unchanged across all episodes.
         """
         super().__init__()
 
@@ -102,6 +107,7 @@ class MazeEnv(gymnasium.Env):
         self._robot_config = robot_config
         self._maze = maze
         self._cell_size = cell_size
+        self._maze_factory = maze_factory
         self._dt = dt
         self._max_steps = max_steps
         self.render_mode = render_mode
@@ -140,17 +146,10 @@ class MazeEnv(gymnasium.Env):
         )
 
         # Resolve the active component list.
+        _default: list[RewardComponent] = [VelocityReward(), ExploreReward(), ActionSmoothReward()]
         self._reward_components: list[RewardComponent] = (
-            reward_components
-            if reward_components is not None
-            else [VelocityReward(), ExploreReward(), ActionSmoothReward()]
+            reward_components if reward_components is not None else _default
         )
-
-        # Validate WallFollowReward sensor names at construction time.
-        sensor_names = [sc.name for sc in robot_config.sensors]
-        for component in self._reward_components:
-            if isinstance(component, WallFollowReward) and component.weight != 0.0:
-                component.validate(sensor_names)
 
         # Episode state — initialised properly in reset().
         self._state: RobotState = RobotState()
@@ -180,6 +179,10 @@ class MazeEnv(gymnasium.Env):
             A ``(observation, info)`` pair.
         """
         super().reset(seed=seed)
+
+        if self._maze_factory is not None:
+            new_seed = int(self.np_random.integers(0, 2**31))
+            self._update_maze(self._maze_factory(new_seed))
 
         self._state = self._initial_state()
         self._step_count = 0
@@ -255,6 +258,19 @@ class MazeEnv(gymnasium.Env):
     # Internals
     # ------------------------------------------------------------------
 
+    def _update_maze(self, maze: Maze) -> None:
+        """Replace the active maze and rebuild world and engine objects.
+
+        Closes and nullifies the renderer so it is recreated on the next
+        render() call with the new maze geometry.
+        """
+        self._maze = maze
+        self._world = MazeWorld(maze, self._cell_size)
+        self._engine = PhysicsEngine(self._robot_config, self._world)
+        if self._renderer is not None:
+            self._renderer.close()
+            self._renderer = None
+
     def _compute_reward(self, action: np.ndarray, obs: np.ndarray) -> tuple[float, dict[str, float]]:
         """Compute the reward for the current step.
 
@@ -278,6 +294,7 @@ class MazeEnv(gymnasium.Env):
             action=action.astype(np.float32),
             prev_action=self._prev_action,
             is_new_cell=is_new_cell,
+            has_collision=bool(self._engine.last_collisions),
             robot_config=self._robot_config,
         )
 

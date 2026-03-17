@@ -12,9 +12,9 @@ from robo_gym.env.reward import (
     ActionSmoothReward,
     ExploreReward,
     VelocityReward,
-    WallFollowReward,
 )
 from robo_gym.maze.maze import Maze
+from robo_gym.maze.generator import generate_dfs
 from robo_gym.sim_core.robot import RobotConfig
 from robo_gym.sim_core.ultrasonic import UltrasonicSensorConfig
 
@@ -416,101 +416,39 @@ class TestReward:
 
 
 # ---------------------------------------------------------------------------
-# Wall-following reward
+# Maze factory (regeneration on reset)
 # ---------------------------------------------------------------------------
 
-def _wall_follow_env(
-    target: float = 0.10,
-    weight: float = 1.0,
-    sensor_name: str = "right",
-) -> MazeEnv:
-    """Env with a single right-facing sensor for wall-follow testing."""
-    sensor = UltrasonicSensorConfig(
-        name=sensor_name,
-        position_offset=(0.0, 0.0),
-        angle_offset=-math.pi / 2,  # faces right
-        max_range=1.0,
-        spurious_rate=0.0,
-    )
-    return MazeEnv(
-        robot_config=RobotConfig(sensors=(sensor,)),
-        maze=_blank_maze("E"),
-        cell_size=_CELL_SIZE,
-        rng_seed=0,
-        reward_components=[
-            WallFollowReward(weight=weight, sensor_name=sensor_name, target_dist=target),
-        ],
-    )
+def _wall_snapshot(maze: Maze) -> dict:
+    """Snapshot of all cell walls for equality comparison across resets."""
+    return {pos: dict(cell.walls) for pos, cell in maze.cells.items()}
 
 
-class TestWallFollowReward:
-    def test_info_contains_r_wall_follow(self) -> None:
-        """step() info dict exposes r_wall_follow key."""
-        env = _wall_follow_env()
-        env.reset()
-        _, _, _, _, info = env.step(_STOPPED)
-        assert "r_wall_follow" in info
-
-    def test_reward_contribution_zero_when_weight_zero(self) -> None:
-        """Wall-follow contributes 0 to total reward when weight=0.
-
-        The raw r_wall_follow in info may be non-zero (sensor still reads the
-        wall distance), but multiplying by weight=0 means no reward signal.
-        """
+class TestMazeFactory:
+    def test_factory_regenerates_maze_on_reset(self) -> None:
+        """When maze_factory is set, consecutive resets with different gym seeds
+        produce structurally different mazes, confirming the factory is called."""
         env = MazeEnv(
-            robot_config=RobotConfig(sensors=(_us("right"),)),
-            maze=_blank_maze("E"),
+            robot_config=RobotConfig(),
+            maze=generate_dfs(6, 6, seed=0),
             cell_size=_CELL_SIZE,
             rng_seed=0,
-            reward_components=[WallFollowReward(weight=0.0, sensor_name="right")],
+            maze_factory=lambda s: generate_dfs(6, 6, seed=s),
         )
-        env.reset()
-        _, reward, _, _, _ = env.step(_STOPPED)
-        assert reward == pytest.approx(0.0)
+        env.reset(seed=1)
+        snap_a = _wall_snapshot(env._maze)
+        env.reset(seed=99)
+        snap_b = _wall_snapshot(env._maze)
+        assert snap_a != snap_b
 
-    def test_penalty_zero_when_no_wall_in_range(self) -> None:
-        """r_wall_follow is 0.0 when the sensor reads at max_range (open space)."""
-        # 3×3 open maze; right-facing sensor pointing away from any wall.
-        # Start heading East, so right-facing sensor points South.
-        # At cell (0,0) with cell_size=0.3, the robot is at y=0.15.
-        # South boundary is at y=0, so the wall is very close.
-        # Use a 3-cell-tall maze and start at y=1 (middle row) so the sensor
-        # can read max_range.
-        sensor = UltrasonicSensorConfig(
-            name="right",
-            position_offset=(0.0, 0.0),
-            angle_offset=-math.pi / 2,
-            max_range=0.05,   # very short range — won't reach the wall from centre
-            spurious_rate=0.0,
-        )
+    def test_no_factory_maze_unchanged_on_reset(self) -> None:
+        """Without a factory, reset() leaves the maze walls intact."""
         env = MazeEnv(
-            robot_config=RobotConfig(sensors=(sensor,)),
-            maze=Maze.blank(3, 3, start=(1, 1), start_heading="E"),
+            robot_config=RobotConfig(),
+            maze=Maze.blank(3, 3),
             cell_size=_CELL_SIZE,
             rng_seed=0,
-            reward_components=[
-                WallFollowReward(weight=1.0, sensor_name="right", target_dist=0.10),
-            ],
         )
-        env.reset()
-        _, _, _, _, info = env.step(_STOPPED)
-        assert info["r_wall_follow"] == pytest.approx(0.0)
-
-    def test_penalty_bounded(self) -> None:
-        """r_wall_follow is always in [-1, 0]."""
-        env = _wall_follow_env(target=0.10, weight=1.0)
-        env.reset()
-        for _ in range(20):
-            _, _, _, _, info = env.step(_STOPPED)
-            assert -1.0 - 1e-9 <= info["r_wall_follow"] <= 0.0 + 1e-9
-
-    def test_unknown_sensor_raises_when_weight_nonzero(self) -> None:
-        """Constructing the env with a nonexistent wall_follow_sensor raises ValueError."""
-        with pytest.raises(ValueError, match="wall_follow_sensor"):
-            MazeEnv(
-                robot_config=RobotConfig(sensors=(_us("front"),)),
-                maze=_blank_maze("E"),
-                cell_size=_CELL_SIZE,
-                rng_seed=0,
-                reward_components=[WallFollowReward(weight=1.0, sensor_name="nonexistent")],
-            )
+        snap = _wall_snapshot(env._maze)
+        env.reset(seed=42)
+        assert _wall_snapshot(env._maze) == snap

@@ -33,6 +33,12 @@ class PhysicsEngine:
         """
         self._config = config
         self._world = world
+        self._last_collisions: list = []
+
+    @property
+    def last_collisions(self) -> list:
+        """Collision events produced during the most recent ``step()`` call."""
+        return self._last_collisions
 
     def step(
         self,
@@ -55,5 +61,5 @@ class PhysicsEngine:
         """
         vl, vr = resolve_wheel_speeds(v_left, v_right, self._config.drivetrain)
         proposed = step_kinematics(state, self._config.chassis, vl, vr, dt)
-        events = self._world.detect_collisions(proposed, self._config.chassis)
-        return apply_collision_response(proposed, events)
+        self._last_collisions = self._world.detect_collisions(proposed, self._config.chassis)
+        return apply_collision_response(proposed, self._last_collisions)

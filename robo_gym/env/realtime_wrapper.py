@@ -87,7 +87,7 @@ class RealtimeWrapper(gymnasium.Wrapper):
         Returns:
             Standard ``(obs, reward, terminated, truncated, info)`` tuple.
         """
-        result = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
 
         now = time.perf_counter()
         slack = self._next_step_t - now
@@ -108,4 +108,4 @@ class RealtimeWrapper(gymnasium.Wrapper):
         # Advance the scheduled clock by exactly sim_dt — drift-free.
         self._next_step_t += self._sim_dt
 
-        return result
+        return obs, float(reward), terminated, truncated, info
