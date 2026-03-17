@@ -1,0 +1,13 @@
+# @package _global_
+defaults:
+  - override /robot: basic_v1
+  - override /model: ppo
+  - override /maze: generated_6x6
+
+model:
+  policy_kwargs:
+    net_arch: [256, 64, 256]
+
+training:
+  total_timesteps: 100_000
+

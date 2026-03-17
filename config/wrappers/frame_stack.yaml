@@ -1,0 +1,7 @@
+# @package _global_
+wrappers:
+  - type: LastActionWrapper
+  - type: FrameStackObservation
+    params:
+      stack_size: 10
+temporal_mode: frame_stack

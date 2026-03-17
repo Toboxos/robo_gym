@@ -1,0 +1,12 @@
+path: "mazes/maze_6x6_dfs_seed42.maze.json"
+
+cell_size: 0.3 # [m]
+
+# time between physic updates
+sim_dt: 0.005 # [s]
+
+# time between agent steps
+agent_dt: 0.01
+
+# maximum run time of the simulation
+max_time: 10 # [s]

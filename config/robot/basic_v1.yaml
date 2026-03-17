@@ -1,0 +1,30 @@
+chassis:
+  # Wheel or track seperation
+  wheel_base: 0.13              # [m]
+  axle_offset: 0.0              # [m]
+
+  # Robot dimensions
+  body_width: 0.10              # [m]
+  body_length: 0.12             # [m]
+
+drivetrain:
+  wheel_radius: 0.027           # [m]
+  max_speed: 0.5                # [m/s]
+  drive_type: "WHEEL"
+  turn_drag: 1.0
+  lateral_slip: null
+
+sensors:
+  - type: "ultrasonic"
+    name: "front"
+    position_offset: [0.055, 0.0]
+    angle_offset: 0.0
+    max_range: 2.0
+    spurious_rate: 0.0
+
+  - type: "ultrasonic"
+    name: "right"
+    position_offset: [0.04, -0.048]
+    angle_offset: -1.57079632679
+    max_range: 2.0
+    spurious_rate: 0.0

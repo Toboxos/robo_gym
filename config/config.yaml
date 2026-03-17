@@ -1,0 +1,15 @@
+defaults:
+  - robot: basic_v1
+  - model: ppo
+  - maze: generated_6x6
+  - reward: explore_only
+  - wrappers: frame_stack
+  - training: default
+  - eval: quick
+  - _self_             # _self_ last: root inline keys override group defaults
+
+wandb:
+  project: "robo_gym"
+  group: null          # set by pipeline runner to group stages into one experiment
+
+seed: 42

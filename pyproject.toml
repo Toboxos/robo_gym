@@ -5,9 +5,9 @@ description = "2D robot simulation framework for RoboCup Junior Maze Entry RL tr
 requires-python = ">=3.13"
 dependencies = [
     "gymnasium>=0.29",
-    "matplotlib>=3.10.8",
     "numpy>=2.0",
     "pygame>=2.6",
+    "torch>=2.10.0",
 ]
 
 [build-system]
@@ -17,7 +17,37 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.pyright]
+pythonVersion = "3.13"
+venvPath = "."
+venv = ".venv"
+include = ["robo_gym", "training_suite", "train.py", "eval.py"]
+typeCheckingMode = "standard"
+reportMissingModuleSource = false
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
 [dependency-groups]
 dev = [
+    "gymnasium[other]>=1.2.3",
+    "hydra-core>=1.3.2",
+    "matplotlib>=3.10.8",
+    "pandas>=3.0.1",
+    "pyarrow>=23.0.1",
+    "pyright>=1.1.408",
     "pytest>=9.0.2",
+    "stable-baselines3>=2.7.1",
+    "tensorboard>=2.20.0",
+    "wandb>=0.25.1",
 ]

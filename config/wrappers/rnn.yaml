@@ -1,0 +1,5 @@
+# @package _global_
+# No wrappers: LSTM handles temporal context natively.
+# LastActionWrapper omitted — ablate separately (rnn_with_last_action.yaml) if needed.
+wrappers: []
+temporal_mode: rnn

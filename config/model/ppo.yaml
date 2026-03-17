@@ -1,0 +1,13 @@
+policy: "MlpPolicy"
+learning_rate: 3e-4
+batch_size: 128
+n_epochs: 10
+gamma: 0.99
+gae_lambda: 0.95
+clip_range: 0.2
+device: "cpu"
+
+policy_kwargs:
+  net_arch: [256, 64, 256]
+
+temporal_context: none  # MLP: no recurrent state, relies on wrappers

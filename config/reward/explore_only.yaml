@@ -1,0 +1,6 @@
+# @package _global_
+rewards:
+  - type: "ExploreReward"
+    weight: 10
+  - type: "WallCollisionPenalty"
+    weight: 0.1

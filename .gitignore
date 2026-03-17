@@ -24,3 +24,10 @@ build/
 
 # Ignore local user test files
 .user/
+
+# Ignore training outputs
+outputs/
+models/
+wandb/
+artifacts/
+multirun/
