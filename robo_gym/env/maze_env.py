@@ -15,6 +15,7 @@ from robo_gym.env.reward import (
     RewardContext,
     VelocityReward,
 )
+from robo_gym.maze.cell import TileType
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.engine import PhysicsEngine
 from robo_gym.sim_core.maze_world import MazeWorld
@@ -70,6 +71,7 @@ class MazeEnv(gymnasium.Env):
         renderer_config: Any | None = None,
         reward_components: list[RewardComponent] | None = None,
         maze_factory: Callable[[int], Maze] | None = None,
+        random_start: bool = False,
     ) -> None:
         """Initialise the environment.
 
@@ -95,6 +97,11 @@ class MazeEnv(gymnasium.Env):
                                 every episode to install a freshly generated maze.
                                 When ``None`` (default), the maze passed at construction
                                 is reused unchanged across all episodes.
+            random_start:       When ``True``, ``reset()`` places the robot on a
+                                randomly chosen walkable cell instead of always using
+                                ``maze.start``.  Useful for training diversity.
+                                An explicit ``options["start_cell"]`` passed to
+                                ``reset()`` always takes precedence.
         """
         super().__init__()
 
@@ -105,6 +112,7 @@ class MazeEnv(gymnasium.Env):
             )
 
         self._robot_config = robot_config
+        self._random_start = random_start
         self._maze = maze
         self._cell_size = cell_size
         self._maze_factory = maze_factory
@@ -169,12 +177,18 @@ class MazeEnv(gymnasium.Env):
         seed: int | None = None,
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
-        """Reset the environment to the maze start pose.
+        """Reset the environment, placing the robot at its start pose.
+
+        Spawn precedence (highest to lowest):
+        1. ``options["start_cell"]`` — explicit ``(col, row)`` grid coordinate.
+        2. ``random_start=True`` — random walkable cell chosen each episode.
+        3. ``maze.start`` — fixed start cell defined in the maze.
 
         Args:
             seed:    Optional RNG seed forwarded to ``gymnasium.Env.reset``
                      (re-seeds the environment's internal ``np_random``).
-            options: Unused; accepted for API compatibility.
+            options: Optional dict.  Recognised key: ``"start_cell": (col, row)``
+                     to pin the robot to a specific grid cell for this episode.
 
         Returns:
             A ``(observation, info)`` pair.
@@ -185,7 +199,12 @@ class MazeEnv(gymnasium.Env):
             new_seed = int(self.np_random.integers(0, 2**31))
             self._update_maze(self._maze_factory(new_seed))
 
-        self._state = self._initial_state()
+        if options is not None and "start_cell" in options:
+            self._state = self._state_for_cell(*options["start_cell"], heading=options.get("start_heading", "N"))
+        elif self._random_start:
+            self._state = self._random_initial_state()
+        else:
+            self._state = self._initial_state()
         self._step_count = 0
         self._trajectory.clear()
         self._trajectory.append((self._state.x, self._state.y))
@@ -331,11 +350,26 @@ class MazeEnv(gymnasium.Env):
 
     def _initial_state(self) -> RobotState:
         """Derive the start RobotState from maze.start and maze.start_heading."""
-        cx, cy = self._maze.start
+        return self._state_for_cell(*self._maze.start, self._maze.start_heading)
+
+    def _state_for_cell(self, cx: int, cy: int, heading: str) -> RobotState:
+        """Return a RobotState centred on grid cell (cx, cy) with maze.start_heading."""
         x = (cx + 0.5) * self._cell_size
         y = (cy + 0.5) * self._cell_size
-        theta = _HEADING_TO_RADIANS[self._maze.start_heading]
+        theta = _HEADING_TO_RADIANS[heading]
         return RobotState(x=x, y=y, theta=theta)
+
+    def _random_initial_state(self) -> RobotState:
+        """Pick a random walkable cell and random cardinal heading."""
+        walkable = [
+            pos for pos, cell in self._maze.cells.items()
+            if cell.tile_type != TileType.BLACK_TILE
+        ]
+        cx, cy = walkable[int(self.np_random.integers(0, len(walkable)))]
+        heading = list(_HEADING_TO_RADIANS.keys())[
+            int(self.np_random.integers(0, len(_HEADING_TO_RADIANS)))
+        ]
+        return self._state_for_cell(cx, cy, heading)
 
     def _get_obs(self) -> np.ndarray:
         """Read all sensors and return their values as a float32 array."""

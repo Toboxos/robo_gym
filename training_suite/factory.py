@@ -241,6 +241,7 @@ def make_env(
         reward_components=reward_components,
         render_mode=render_mode,
         maze_factory=maze_factory,
+        random_start=bool(cfg.maze.get("random_start", False)),
     )
 
     # Mandatory innermost structural wrapper.

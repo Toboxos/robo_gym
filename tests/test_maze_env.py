@@ -416,6 +416,83 @@ class TestReward:
 
 
 # ---------------------------------------------------------------------------
+# Random start / options["start_cell"]
+# ---------------------------------------------------------------------------
+
+class TestRandomStart:
+    def test_random_start_spawns_in_different_cells_across_episodes(self) -> None:
+        """With random_start=True, the robot does not always start at maze.start."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(4, 4, start=(0, 0)),
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+            random_start=True,
+        )
+        start_cells: set[tuple[int, int]] = set()
+        for i in range(20):
+            env.reset(seed=i)
+            cx = int(env._state.x / _CELL_SIZE)
+            cy = int(env._state.y / _CELL_SIZE)
+            start_cells.add((cx, cy))
+        assert len(start_cells) > 1, "random_start should produce multiple distinct spawn cells"
+
+    def test_options_start_cell_pins_spawn(self) -> None:
+        """options['start_cell'] places the robot at the specified cell centre."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(4, 4, start=(0, 0)),
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+        )
+        env.reset(options={"start_cell": (2, 3)})
+        assert env._state.x == pytest.approx((2 + 0.5) * _CELL_SIZE)
+        assert env._state.y == pytest.approx((3 + 0.5) * _CELL_SIZE)
+
+    def test_options_start_cell_overrides_random_start(self) -> None:
+        """options['start_cell'] takes precedence over random_start=True."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(4, 4, start=(0, 0)),
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+            random_start=True,
+        )
+        env.reset(options={"start_cell": (1, 1)})
+        assert env._state.x == pytest.approx((1 + 0.5) * _CELL_SIZE)
+        assert env._state.y == pytest.approx((1 + 0.5) * _CELL_SIZE)
+
+    def test_random_start_varies_heading(self) -> None:
+        """With random_start=True, the robot heading varies across episodes."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(4, 4, start=(0, 0)),
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+            random_start=True,
+        )
+        headings: set[float] = set()
+        for i in range(20):
+            env.reset(seed=i)
+            headings.add(round(env._state.theta, 6))
+        assert len(headings) > 1, "random_start should produce multiple distinct headings"
+
+    def test_random_start_false_always_uses_maze_start(self) -> None:
+        """With random_start=False (default), every reset lands at maze.start."""
+        maze = Maze.blank(4, 4, start=(2, 1))
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=maze,
+            cell_size=_CELL_SIZE,
+            rng_seed=0,
+        )
+        for i in range(5):
+            env.reset(seed=i)
+            assert env._state.x == pytest.approx((2 + 0.5) * _CELL_SIZE)
+            assert env._state.y == pytest.approx((1 + 0.5) * _CELL_SIZE)
+
+
+# ---------------------------------------------------------------------------
 # Maze factory (regeneration on reset)
 # ---------------------------------------------------------------------------
 

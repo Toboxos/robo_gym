@@ -10,3 +10,6 @@ agent_dt: 0.01
 
 # maximum run time of the simulation
 max_time: 10 # [s]
+
+# randomise robot spawn position and heading each episode
+random_start: false
