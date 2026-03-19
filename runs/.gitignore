@@ -1,3 +1,0 @@
-# Ignore all run output but keep the directory
-*
-!.gitignore

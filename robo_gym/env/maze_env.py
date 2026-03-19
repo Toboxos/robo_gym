@@ -157,6 +157,7 @@ class MazeEnv(gymnasium.Env):
         self._trajectory: list[tuple[float, float]] = []
         self._visited_cells: set[tuple[int, int]] = set()
         self._prev_action: np.ndarray = np.zeros(2, dtype=np.float32)
+        self._collision_count: int = 0
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -190,6 +191,7 @@ class MazeEnv(gymnasium.Env):
         self._trajectory.append((self._state.x, self._state.y))
         self._visited_cells = {self._current_cell()}
         self._prev_action = np.zeros(2, dtype=np.float32)
+        self._collision_count = 0
 
         return self._get_obs(), {}
 
@@ -218,10 +220,23 @@ class MazeEnv(gymnasium.Env):
         obs = self._get_obs()
         reward, reward_info = self._compute_reward(action, obs)
 
+        if self._engine.last_collisions:
+            self._collision_count += 1
+
         terminated = False
         truncated = (
             self._max_steps is not None and self._step_count >= self._max_steps
         )
+
+        if truncated:
+            total_cells = self._maze.width * self._maze.height
+            reward_info["cells_visited_count"] = len(self._visited_cells)
+            reward_info["cells_visited_mean"] = len(self._visited_cells) / total_cells
+            reward_info["collision_count"] = self._collision_count
+            reward_info["collision_rate"] = (
+                self._collision_count / self._step_count if self._step_count > 0 else 0.0
+            )
+
         return obs, reward, terminated, truncated, reward_info
 
     def render(self) -> np.ndarray | None:

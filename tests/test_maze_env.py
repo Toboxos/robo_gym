@@ -452,3 +452,62 @@ class TestMazeFactory:
         snap = _wall_snapshot(env._maze)
         env.reset(seed=42)
         assert _wall_snapshot(env._maze) == snap
+
+
+# ---------------------------------------------------------------------------
+# Level 0 episode metrics (injected at truncation)
+# ---------------------------------------------------------------------------
+
+class TestEpisodeMetrics:
+    def _env_with_limit(self, max_steps: int) -> MazeEnv:
+        """Blank 3×3 env that truncates after max_steps physics ticks."""
+        return MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(3, 3),
+            cell_size=_CELL_SIZE,
+            dt=0.01,
+            max_steps=max_steps,
+        )
+
+    def test_metrics_present_at_truncation(self) -> None:
+        """cells_visited_mean and collision_rate must appear in info on the terminal step."""
+        env = self._env_with_limit(max_steps=1)
+        env.reset()
+        _, _, _, truncated, info = env.step(np.zeros(2, dtype=np.float32))
+        assert truncated
+        assert "cells_visited_mean" in info
+        assert "collision_rate" in info
+        assert "cells_visited_count" in info
+        assert "collision_count" in info
+
+    def test_metrics_absent_mid_episode(self) -> None:
+        """Episode metrics must NOT appear in info before the terminal step."""
+        env = self._env_with_limit(max_steps=5)
+        env.reset()
+        for _ in range(4):
+            _, _, _, truncated, info = env.step(np.zeros(2, dtype=np.float32))
+            assert not truncated
+            assert "cells_visited_mean" not in info
+            assert "collision_rate" not in info
+
+    def test_cells_visited_mean_in_unit_range(self) -> None:
+        """cells_visited_mean must be in (0, 1]."""
+        env = self._env_with_limit(max_steps=1)
+        env.reset()
+        _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
+        assert 0.0 < info["cells_visited_mean"] <= 1.0
+
+    def test_collision_rate_zero_when_no_collision(self) -> None:
+        """collision_rate must be 0 when the robot never hits a wall (blank maze, zero action)."""
+        env = self._env_with_limit(max_steps=1)
+        env.reset()
+        _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
+        assert info["collision_rate"] == 0.0
+
+    def test_collision_count_resets_on_reset(self) -> None:
+        """_collision_count must be 0 after reset()."""
+        env = self._env_with_limit(max_steps=1)
+        env.reset()
+        env.step(np.zeros(2, dtype=np.float32))
+        env.reset()
+        assert env._collision_count == 0
