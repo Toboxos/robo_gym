@@ -1,16 +1,7 @@
-defaults:
-  - _base_training_
-
 total_timesteps: 400_000
 n_envs: 4
-save_checkpoint_freq: 50_000
-checkpoint_keep_last: 3
-eval_freq: 25_000
+save_checkpoint_freq: 100_000
+eval_freq: 250_000
 eval_episodes: 10
-eval_profile: quick
-record_trajectories: true
-trajectory_flush_every: 100
 
-# Stage branching — experimental state, belongs in config (see TRAINING_SUITE_FRAMEWORK.md §6.1)
-init_from: null                # "runs/abc/ckpt_best.zip" or "wandb:robo_gym/model:v2"
-init_weights_only: true        # false = full state restore (crash-continue only)
+init_from: null # used for branching to init model from another artefact

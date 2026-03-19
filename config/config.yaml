@@ -5,7 +5,6 @@ defaults:
   - reward: explore_only
   - wrappers: frame_stack
   - training: default
-  - eval: quick
   - _self_             # _self_ last: root inline keys override group defaults
 
 wandb:

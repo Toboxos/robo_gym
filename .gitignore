@@ -31,3 +31,4 @@ models/
 wandb/
 artifacts/
 multirun/
+checkpoints/

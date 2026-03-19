@@ -1,8 +1,0 @@
-defaults:
-  - _base_eval_
-
-episodes: 10
-mazes:
-  - training
-render: false
-report: false

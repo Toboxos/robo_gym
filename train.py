@@ -1,180 +1,105 @@
-"""Training entry point for the robo_gym RL pipeline.
+"""Training lifecycle CLI for robo_gym.
 
 Usage::
 
-    uv run python train.py                                       # fresh start
-    uv run python train.py --resume                              # crash resume
-    uv run python train.py wrappers=minimal                      # override group
-    uv run python train.py training.init_from=runs/abc/ckpt_best.zip  # stage branch
+    uv run python train.py start ppo_example
+    uv run python train.py start ppo_example -- training.total_timesteps=500000
+    uv run python train.py resume <run_id>
+    uv run python train.py branch <source_run_id> ppo_example
+    uv run python train.py branch <source_run_id> ppo_example -- training.total_timesteps=2000000
+    uv run python train.py promote-checkpoint runs/abc123/ckpt_050k.zip
+    uv run python train.py promote-checkpoint runs/abc123/ckpt_050k.zip --alias best
 """
 from __future__ import annotations
 
+import click
+import hydra
 import logging
 import sys
+
 from pathlib import Path
-
-import hydra
-import wandb
 from omegaconf import DictConfig, OmegaConf
-from stable_baselines3.common.callbacks import CallbackList
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from wandb.integration.sb3 import WandbCallback
-
-from training_suite import LastActionWrapper, make_env, make_model, make_robot  # noqa: F401
-from training_suite.checkpoint import (
-    CheckpointCallback,
-    compute_cfg_hash,
-    find_latest_checkpoint,
-    load_checkpoint,
-)
-from training_suite.config_schema import register_schemas
-
-register_schemas()
-
-# ---------------------------------------------------------------------------
-# --resume detection: strip the flag before Hydra sees sys.argv
-# ---------------------------------------------------------------------------
-_RESUME = "--resume" in sys.argv
-if _RESUME:
-    sys.argv.remove("--resume")
+from training_suite.trainer import train
+from training_suite.checkpoint import find_latest_checkpoint, read_checkpoint_config
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
-def _find_run_dir_by_hash(cfg_hash: str) -> Path | None:
-    """Scan runs/ for the most recent run whose config_hash.txt matches cfg_hash."""
-    runs_root = Path("runs")
-    if not runs_root.exists():
-        return None
-    candidates = sorted(
-        runs_root.iterdir(),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    for run_dir in candidates:
-        hash_file = run_dir / "config_hash.txt"
-        if hash_file.exists() and hash_file.read_text().strip() == cfg_hash:
-            return run_dir
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 @hydra.main(version_base=None, config_path="./config", config_name="config")
-def train(cfg: DictConfig) -> None:
-    """Train a PPO agent with full checkpoint and resume support."""
-    log = logging.getLogger(__name__)
-    log.info("Config:\n%s", OmegaConf.to_yaml(cfg))
+def _hydra_main(cfg: DictConfig) -> None:
+    """
+    Wrapper function to use hydra for config creations
+    """
+    train(cfg)
 
-    # --- Resume detection ---
-    start_step = 0
-    resume_run_id: str | None = None
-    ckpt_path: Path | None = None
 
-    if _RESUME:
-        cfg_hash = compute_cfg_hash(cfg)
-        resume_run_dir = _find_run_dir_by_hash(cfg_hash)
-        if resume_run_dir is None:
-            log.warning("--resume requested but no matching run found; starting fresh.")
-        else:
-            ckpt_path = find_latest_checkpoint(resume_run_dir)
-            if ckpt_path is None:
-                log.warning(
-                    "Matching run %s found but no numbered checkpoint; starting fresh.",
-                    resume_run_dir,
-                )
-            else:
-                resume_run_id = resume_run_dir.name
-                log.info("Resuming run %s from %s", resume_run_id, ckpt_path)
+@click.group()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+def cli(verbose: bool) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
 
-    # Also support stage branching via config (init_from is in training group)
-    init_from = cfg.training.get("init_from")
 
-    # --- W&B init ---
-    wandb_kwargs: dict = dict(
-        project=cfg.wandb.project,
-        config=OmegaConf.to_container(cfg, resolve=True),
-        group=cfg.wandb.get("group"),
-    )
-    if resume_run_id is not None:
-        wandb_kwargs["id"] = resume_run_id
-        wandb_kwargs["resume"] = "must"
+@cli.command(context_settings={"allow_extra_args": True})
+@click.argument("experiment")
+@click.pass_context
+def start(ctx: click.Context, experiment: str) -> None:
+    """
+    Start a fresh training run from EXPERIMENT config.
 
-    wandb.init(**wandb_kwargs)
-    assert wandb.run is not None, "wandb.init() failed to create a run"
+    Hydra overrides can be passed after '--':
 
-    run_dir = Path("runs") / wandb.run.id
-    run_dir.mkdir(parents=True, exist_ok=True)
+        train.py start ppo_example -- training.total_timesteps=1000000
+    """
+    hydra_overrides: list[str] = list(ctx.args)
+    click.echo(f"Starting fresh run: experiment={experiment}, overrides={hydra_overrides}")
 
-    # Write config hash + full config on first run.
-    hash_file = run_dir / "config_hash.txt"
-    if not hash_file.exists():
-        hash_file.write_text(compute_cfg_hash(cfg))
-        (run_dir / "config.yaml").write_text(OmegaConf.to_yaml(cfg))
+    sys.argv = [sys.argv[0], f"+experiment={experiment}", *ctx.args]
+    _hydra_main()
 
-    # --- Env & model creation ---
-    robot = make_robot(cfg.robot)
-    n_envs = cfg.training.n_envs
 
-    env = make_vec_env(
-        lambda: make_env(cfg, robot, seed=cfg.seed),
-        n_envs=n_envs,
-        seed=cfg.seed,
-        vec_env_cls=SubprocVecEnv,
-    )
+@cli.command()
+@click.argument("run_id")
+@click.option("--label", default=None, help="Label of the checkpoint without .zip extension")
+def resume(run_id: str, label: str) -> None:
+    """Resume training from a local checkpoint.
 
-    model = make_model(cfg.model, env, cfg.seed, tensorboard_log=str(run_dir))
+    RUN_ID is the W&B run ID (the name of the directory under runs/).
+    Config is loaded from the saved checkpoint — no Hydra
+    overrides are accepted to keep the resumed run config-identical.
+    """
+    checkpoint_dir = Path("checkpoints") / run_id
+    if not checkpoint_dir.exists():
+        raise click.ClickException(f"Checkpoint directory not found: {checkpoint_dir}")
 
-    # --- Load checkpoint if resuming or branching ---
-    if ckpt_path is not None:
-        # Crash resume: full state restore, hash must match
-        start_step = load_checkpoint(ckpt_path, model, cfg, weights_only=False)
-        log.info("Crash-resumed from step %d", start_step)
-    elif init_from:
-        # Stage branch: weights only, optimizer + step counter reset
-        branch_path = Path(init_from)
-        start_step = load_checkpoint(branch_path, model, cfg, weights_only=True)
-        log.info("Stage branch: loaded weights from %s", branch_path)
+    if label:
+        checkpoint = (checkpoint_dir / f"{label}.zip").resolve()
+    else:
+        last_checkpoint = find_latest_checkpoint(checkpoint_dir)
+        if not last_checkpoint:
+            raise click.ClickException(f"Could not locate last checkpoint")
+        
+        checkpoint = last_checkpoint.resolve()
 
-    # --- Callbacks ---
-    total_steps = cfg.training.total_timesteps
-    ckpt_cb = CheckpointCallback(
-        cfg=cfg,
-        run_dir=run_dir,
-        save_freq=cfg.training.save_checkpoint_freq,
-        keep_last=cfg.training.checkpoint_keep_last,
-        total_steps=total_steps,
-    )
-    wandb_cb = WandbCallback(
-        model_save_path=str(run_dir / "wandb_model"),
-        model_save_freq=cfg.training.save_checkpoint_freq,
-        gradient_save_freq=100,
-        verbose=0,
-    )
+    cfg = read_checkpoint_config(checkpoint)
+    click.echo(f"Resuming run {run_id} from {checkpoint}")
+    train(cfg, run_id, checkpoint)
 
-    # --- Train ---
-    remaining = total_steps - start_step
-    model.learn(
-        total_timesteps=remaining,
-        reset_num_timesteps=(start_step == 0),
-        callback=CallbackList([ckpt_cb, wandb_cb]),
-    )
 
-    # --- Save final model ---
-    final_path = run_dir / "model_final.zip"
-    model.save(str(final_path))
-    log.info("Saved final model to %s", final_path)
+@cli.command("promote-checkpoint")
+@click.argument("checkpoint_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--run-id", default=None, help="W&B run ID (inferred from checkpoint metadata if omitted).")
+@click.option("--alias", default=None, help="Artifact alias to attach, e.g. 'best' or 'staging'.")
+def promote_checkpoint(checkpoint_path: Path, run_id: str | None, alias: str | None) -> None:
+    """Upload CHECKPOINT_PATH to W&B as a model artifact on the producing run.
 
-    artifact = wandb.Artifact("model", type="model")
-    artifact.add_file(str(final_path))
-    wandb.log_artifact(artifact)
-    wandb.finish()
+    The W&B run ID is read from the checkpoint's .meta.json sidecar file.
+    Pass --run-id to override if the sidecar is missing.
+    """
+    click.echo(f"Promoting checkpoint: {checkpoint_path}, run_id={run_id}, alias={alias}")
+    raise NotImplementedError
 
 
 if __name__ == "__main__":
-    train()
+    cli()
