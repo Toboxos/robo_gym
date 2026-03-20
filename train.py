@@ -9,6 +9,8 @@ Usage::
     uv run python train.py branch <source_run_id> ppo_example -- training.total_timesteps=2000000
     uv run python train.py promote-checkpoint runs/abc123/ckpt_050k.zip
     uv run python train.py promote-checkpoint runs/abc123/ckpt_050k.zip --alias best
+    uv run python train.py deploy slurm ppo_example --out dist/
+    uv run python train.py deploy slurm ppo_example --single-file
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import hydra
 import logging
 import sys
 
+from datetime import datetime
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 from training_suite.trainer import train
@@ -37,8 +40,14 @@ def _hydra_main(cfg: DictConfig) -> None:
 @click.group()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
 def cli(verbose: bool) -> None:
+    from rich.logging import RichHandler
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=level,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+    )
 
 
 @cli.command(context_settings={"allow_extra_args": True})
@@ -99,6 +108,64 @@ def promote_checkpoint(checkpoint_path: Path, run_id: str | None, alias: str | N
     """
     click.echo(f"Promoting checkpoint: {checkpoint_path}, run_id={run_id}, alias={alias}")
     raise NotImplementedError
+
+
+@cli.group()
+def deploy() -> None:
+    """Commands to produce deployment bundles."""
+
+
+@deploy.command("slurm")
+@click.argument("experiment")
+@click.option("--out", "out_dir", default=None, type=click.Path(path_type=Path),
+              help="Output directory. Default: dist/<experiment>_<timestamp>.")
+@click.option("--single-file", is_flag=True, default=False,
+              help="Pack everything into one self-extracting bash script.")
+@click.option("--time", default="24:00:00", show_default=True,
+              help="SLURM wall time.")
+@click.option("--mem", default="16G", show_default=True,
+              help="SLURM memory per node.")
+@click.option("--gpus", default=1, show_default=True, type=int,
+              help="Number of GPUs.")
+@click.option("--partition", default="gpu", show_default=True,
+              help="SLURM partition.")
+def deploy_slurm(
+    experiment: str,
+    out_dir: Path | None,
+    single_file: bool,
+    time: str,
+    mem: str,
+    gpus: int,
+    partition: str,
+) -> None:
+    """Build a SLURM deployment bundle for EXPERIMENT.
+
+    Sweeps are defined in the experiment config under a ``sweeps`` key:
+
+        sweeps:
+          model.learning_rate: "1e-3,1e-4,3e-4"
+          training.n_envs: "4,8"
+
+    The cartesian product is resolved and job.sh gets --array=0-N automatically.
+    """
+    from training_suite.deploy.slurm import DeployConfig, SlurmOptions, deploy_slurm as _deploy
+
+    if out_dir is None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = Path("dist") / f"{experiment}_{ts}"
+
+    cfg = DeployConfig(
+        experiment=experiment,
+        out_dir=out_dir,
+        slurm=SlurmOptions(time=time, mem=mem, gpus=gpus, partition=partition),
+        single_file=single_file,
+    )
+    _deploy(cfg)
+
+    if single_file:
+        click.echo(f"Single-file script: {out_dir.parent / f'job_{experiment}.sh'}")
+    else:
+        click.echo(f"Bundle directory: {out_dir}")
 
 
 if __name__ == "__main__":

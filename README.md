@@ -174,6 +174,26 @@ maze.save_json("mazes/my_maze.maze.json")
 
 ---
 
+## 🏋️ Training Suite
+
+Install training dependencies:
+
+```bash
+uv sync --extra training
+```
+
+Start a training run:
+
+```bash
+uv run python train.py start ppo_example
+uv run python train.py resume <run_id>
+uv run python train.py deploy slurm ppo_example --single-file   # SLURM bundle
+```
+
+See [`training_suite/README.md`](training_suite/README.md) for the full CLI reference, config system, and SLURM deployment guide.
+
+---
+
 ## 🧪 Tests
 
 ```bash

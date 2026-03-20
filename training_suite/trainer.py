@@ -1,4 +1,5 @@
 import logging
+import os
 import wandb
 
 from omegaconf import OmegaConf, DictConfig
@@ -65,7 +66,7 @@ def train(cfg: DictConfig, run_id=None, checkpoint: Path | None = None):
 
 
     total_timesteps = cfg.training.total_timesteps
-    checkpoint_dir = Path(f"./checkpoints/{run.id}")
+    checkpoint_dir = Path(os.environ.get("CHECKPOINT_DIR", f"./checkpoints/{run.id}"))
     # --- Callbacks ---
     wandb_cb = WandbCallback()
     metrics_cb = TrainingMetricsCallback(run=run)
