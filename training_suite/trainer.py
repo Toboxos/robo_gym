@@ -6,12 +6,12 @@ from omegaconf import OmegaConf, DictConfig
 from pathlib import Path
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
-from stable_baselines3.common.callbacks import CallbackList, EvalCallback
+from stable_baselines3.common.callbacks import CallbackList
 from wandb.integration.sb3 import WandbCallback
 
 from .factory import make_robot, make_env, make_model
 from .checkpoint import save_checkpoint, load_checkpoint
-from .callbacks import CheckpointCallback, UploadModelCallback, TrainingMetricsCallback
+from .callbacks import CheckpointCallback, MazeEvalCallback, UploadModelCallback, TrainingMetricsCallback
 
 logger = logging.getLogger(__name__)
 
@@ -69,14 +69,14 @@ def train(cfg: DictConfig, run_id=None, checkpoint: Path | None = None):
     checkpoint_dir = Path(os.environ.get("CHECKPOINT_DIR", f"./checkpoints/{run.id}"))
     # --- Callbacks ---
     wandb_cb = WandbCallback()
-    metrics_cb = TrainingMetricsCallback(run=run)
+    metrics_cb = TrainingMetricsCallback()
     checkpoint_cb = CheckpointCallback(
         cfg=cfg,
         checkpoint_dir=checkpoint_dir,
         save_freq=cfg.training.save_checkpoint_freq,
         total_steps=total_timesteps
     )
-    eval_cb = EvalCallback(
+    eval_cb = MazeEvalCallback(
         eval_env=make_env(cfg, robot, seed=1234),
         eval_freq=cfg.training.eval_freq // cfg.training.n_envs,
         callback_on_new_best=UploadModelCallback(

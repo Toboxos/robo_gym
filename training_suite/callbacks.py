@@ -7,6 +7,7 @@ from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from typing import cast
 
 from .checkpoint import save_checkpoint
+from .metrics import EPISODE_KEYS
 
 
 logger = logging.getLogger(__name__)
@@ -55,10 +56,10 @@ class UploadModelCallback(BaseCallback):
     """Saves and uploads a new best model to W&B when EvalCallback finds one."""
 
     def __init__(
-            self, 
+            self,
             run: wandb.Run,
-            cfg: DictConfig, 
-            checkpoint_dir: Path, 
+            cfg: DictConfig,
+            checkpoint_dir: Path,
             total_steps: int
     ) -> None:
         super().__init__()
@@ -85,41 +86,57 @@ class UploadModelCallback(BaseCallback):
         )
         artifact.add_file(str(zip_path))
         self.run.log_artifact(artifact)
-        
+
         return True
 
 
 class TrainingMetricsCallback(BaseCallback):
+    """Logs per-episode maze metrics to the SB3 logger (tensorboard + wandb).
+
+    Reads from ``info["episode"]`` — populated by Monitor via ``info_keywords``
+    — and calls ``self.logger.record_mean`` so values are averaged across all
+    episodes that complete within one SB3 log interval.
     """
-    Logs per-episode training metrics from the info dict to W&B.
-
-    SB3's WandbCallback only tracks internal algorithm metrics (loss, entropy).
-    This callback forwards the Level-0 env metrics — ``cells_visited_mean`` and
-    ``collision_rate`` — to W&B at the end of each training episode.
-    """
-
-    def __init__(self, run: wandb.Run, verbose = 0):
-        super().__init__(verbose)
-
-        self.run = run
 
     def _on_step(self) -> bool:
         dones = self.locals.get("dones", [])
         infos = self.locals.get("infos", [])
-
-        metrics: dict[str, list[float]] = {}
         for done, info in zip(dones, infos):
             if not done:
                 continue
-            for key in ("cells_visited_count", "cells_visited_mean",
-                        "collision_count", "collision_rate"):
-                metrics.setdefault(f"train/{key}", []).append(info.get(key, 0.0))
-
-        if metrics:
-            self.run.log(
-                {k: sum(v) / len(v) for k, v in metrics.items()},
-                step=self.num_timesteps,
-            )
+            for key in EPISODE_KEYS:
+                if key in info:
+                    self.logger.record_mean(f"train/{key}", info[key])
         return True
 
 
+class MazeEvalCallback(EvalCallback):
+    """EvalCallback extended to log per-episode maze metrics after each eval.
+
+    Intercepts ``info["episode"]`` during evaluation via the step-level
+    callback hook, then logs the per-key means through the SB3 logger once
+    evaluation completes.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        """Initialise; all arguments forwarded to EvalCallback."""
+        super().__init__(*args, **kwargs)
+        self._eval_episode_infos: list[dict] = []
+
+    def _log_success_callback(self, locals_: dict, globals_: dict) -> None:
+        """Capture episode infos during evaluate_policy iteration."""
+        super()._log_success_callback(locals_, globals_)
+        for done, info in zip(locals_.get("dones", []), locals_.get("infos", [])):
+            if done:
+                ep = info.get("episode")
+                if ep is not None:
+                    self._eval_episode_infos.append(ep)
+
+    def _on_step(self) -> bool:
+        self._eval_episode_infos.clear()
+        result = super()._on_step()
+        for ep in self._eval_episode_infos:
+            for key in EPISODE_KEYS:
+                if key in ep:
+                    self.logger.record_mean(f"eval/{key}", ep[key])
+        return result

@@ -547,15 +547,14 @@ class TestEpisodeMetrics:
         )
 
     def test_metrics_present_at_truncation(self) -> None:
-        """cells_visited_mean and collision_rate must appear in info on the terminal step."""
+        """Expected episode metrics must appear in info on the terminal step."""
         env = self._env_with_limit(max_steps=1)
         env.reset()
         _, _, _, truncated, info = env.step(np.zeros(2, dtype=np.float32))
         assert truncated
-        assert "cells_visited_mean" in info
-        assert "collision_rate" in info
         assert "cells_visited_count" in info
         assert "collision_count" in info
+        assert "walkable_cells" in info
 
     def test_metrics_absent_mid_episode(self) -> None:
         """Episode metrics must NOT appear in info before the terminal step."""
@@ -564,22 +563,16 @@ class TestEpisodeMetrics:
         for _ in range(4):
             _, _, _, truncated, info = env.step(np.zeros(2, dtype=np.float32))
             assert not truncated
-            assert "cells_visited_mean" not in info
-            assert "collision_rate" not in info
+            assert "walkable_cells" not in info
 
-    def test_cells_visited_mean_in_unit_range(self) -> None:
-        """cells_visited_mean must be in (0, 1]."""
+    def test_walkable_cells_matches_maze(self) -> None:
+        """walkable_cells must equal the number of non-BLACK_TILE cells in the maze."""
+        from robo_gym.maze.cell import TileType
         env = self._env_with_limit(max_steps=1)
         env.reset()
         _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
-        assert 0.0 < info["cells_visited_mean"] <= 1.0
-
-    def test_collision_rate_zero_when_no_collision(self) -> None:
-        """collision_rate must be 0 when the robot never hits a wall (blank maze, zero action)."""
-        env = self._env_with_limit(max_steps=1)
-        env.reset()
-        _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
-        assert info["collision_rate"] == 0.0
+        expected = sum(1 for c in env._maze.cells.values() if c.tile_type != TileType.BLACK_TILE)
+        assert info["walkable_cells"] == expected
 
     def test_collision_count_resets_on_reset(self) -> None:
         """_collision_count must be 0 after reset()."""

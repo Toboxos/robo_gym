@@ -159,6 +159,9 @@ class MazeEnv(gymnasium.Env):
             reward_components if reward_components is not None else _default
         )
 
+        # Maze-invariant metrics — recomputed when the maze changes.
+        self._walkable_cells: int = self._count_walkable_cells()
+
         # Episode state — initialised properly in reset().
         self._state: RobotState = RobotState()
         self._step_count: int = 0
@@ -248,13 +251,10 @@ class MazeEnv(gymnasium.Env):
         )
 
         if truncated:
-            total_cells = self._maze.width * self._maze.height
             reward_info["cells_visited_count"] = len(self._visited_cells)
-            reward_info["cells_visited_mean"] = len(self._visited_cells) / total_cells
             reward_info["collision_count"] = self._collision_count
-            reward_info["collision_rate"] = (
-                self._collision_count / self._step_count if self._step_count > 0 else 0.0
-            )
+            reward_info["walkable_cells"] = self._walkable_cells
+            reward_info["distance_traveled"] = self._compute_distance_traveled()
 
         return obs, reward, terminated, truncated, reward_info
 
@@ -301,9 +301,24 @@ class MazeEnv(gymnasium.Env):
         self._maze = maze
         self._world = MazeWorld(maze, self._cell_size)
         self._engine = PhysicsEngine(self._robot_config, self._world)
+        self._walkable_cells = self._count_walkable_cells()
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
+
+    def _compute_distance_traveled(self) -> float:
+        """Return the total path length in metres from the trajectory log."""
+        return sum(
+            math.hypot(x2 - x1, y2 - y1)
+            for (x1, y1), (x2, y2) in zip(self._trajectory, self._trajectory[1:])
+        )
+
+    def _count_walkable_cells(self) -> int:
+        """Return the number of non-BLACK_TILE cells in the current maze."""
+        return sum(
+            1 for cell in self._maze.cells.values()
+            if cell.tile_type != TileType.BLACK_TILE
+        )
 
     def _compute_reward(self, action: np.ndarray, obs: np.ndarray) -> tuple[float, dict[str, float]]:
         """Compute the reward for the current step.

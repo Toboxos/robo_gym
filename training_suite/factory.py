@@ -14,6 +14,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
 from robo_gym.env import MazeEnv, SubStepWrapper
+from .metrics import EPISODE_KEYS
 from robo_gym.env.reward import (
     ActionSmoothReward,
     ExploreReward,
@@ -260,7 +261,12 @@ def make_env(
         env = wrapper_cls(env, **params)
 
     # Mandatory outermost structural wrapper (SB3 episodic metrics).
-    env = Monitor(env)
+    # info_keywords propagates per-episode maze metrics into info["episode"]
+    # so they are accessible uniformly during both training and evaluation.
+    env = Monitor(
+        env,
+        info_keywords=EPISODE_KEYS,
+    )
 
     return env
 
