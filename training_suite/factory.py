@@ -249,15 +249,15 @@ def make_env(
     # Mandatory innermost structural wrapper.
     env = SubStepWrapper(env, control_dt=cfg.maze.agent_dt)
 
-    # Configurable wrappers — empty list is a valid no-op (e.g. wrappers=minimal).
-    for spec in cfg.wrappers:
-        wrapper_cls = _WRAPPER_MAP.get(spec.type)
+    # Configurable wrappers — empty dict is a valid no-op (e.g. wrappers=minimal).
+    for name, spec in cfg.wrappers.items():
+        wrapper_cls = _WRAPPER_MAP.get(name)
         if wrapper_cls is None:
             raise ValueError(
-                f"Unknown wrapper type {spec.type!r}. "
+                f"Unknown wrapper type {name!r}. "
                 f"Known types: {sorted(_WRAPPER_MAP)}"
             )
-        params = dict(spec.get("params", {}))
+        params = dict(spec.get("params", {})) if spec is not None else {}
         env = wrapper_cls(env, **params)
 
     # Mandatory outermost structural wrapper (SB3 episodic metrics).

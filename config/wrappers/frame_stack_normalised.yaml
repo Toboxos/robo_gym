@@ -1,10 +1,10 @@
 # @package _global_
 wrappers:
-  - type: LastActionWrapper
-  - type: FrameStackObservation
+  LastActionWrapper:
+  FrameStackObservation:
     params:
       stack_size: 10
-  - type: NormalizeObservation
+  NormalizeObservation:
     params:
       epsilon: 1.0e-8
 temporal_mode: frame_stack

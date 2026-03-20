@@ -1,3 +1,3 @@
 # @package _global_
-wrappers: []
+wrappers: {}
 temporal_mode: none    # policy sees only current frame — lower bound for temporal comparisons
