@@ -1,10 +1,8 @@
 # @package _global_
 wrappers:
+  SensorNormalizationWrapper:
   LastActionWrapper:
   FrameStackObservation:
     params:
       stack_size: 10
-  NormalizeObservation:
-    params:
-      epsilon: 1.0e-8
 temporal_mode: frame_stack
