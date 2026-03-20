@@ -15,15 +15,15 @@ drivetrain:
   lateral_slip: null
 
 sensors:
-  - type: "ultrasonic"
-    name: "front"
+  front:
+    type: "ultrasonic"
     position_offset: [0.055, 0.0]
     angle_offset: 0.0
     max_range: 2.0
     spurious_rate: 0.0
 
-  - type: "ultrasonic"
-    name: "right"
+  right:
+    type: "ultrasonic"
     position_offset: [0.04, -0.048]
     angle_offset: -1.57079632679
     max_range: 2.0

@@ -139,15 +139,16 @@ _REWARD_MAP: dict[str, type] = {
 # Sensor / robot factories
 # ---------------------------------------------------------------------------
 
-def make_sensors(cfg: list[DictConfig]) -> tuple[SensorConfig, ...]:
-    """Build sensor configs from a list of Hydra config nodes."""
+def make_sensors(cfg: DictConfig) -> tuple[SensorConfig, ...]:
+    """Build sensor configs from a dict of Hydra config nodes keyed by sensor name."""
     _mapping = {
         "ultrasonic": UltrasonicSensorConfig,
     }
     sensors = []
-    for c in cfg:
-        c_dict: dict[str, Any] = {k: v for k, v in OmegaConf.to_container(c, resolve=True).items()}  # type: ignore[union-attr]
-        sensors.append(_mapping[c_dict["type"]](**{k: v for k, v in c_dict.items() if k != "type"}))
+    for name, c in cfg.items():
+        c_dict: dict[str, Any] = OmegaConf.to_container(c, resolve=True)  # type: ignore[assignment]
+        sensor_type = c_dict.pop("type")
+        sensors.append(_mapping[sensor_type](name=name, **c_dict))
     return tuple(sensors)
 
 
@@ -166,20 +167,20 @@ def make_robot(cfg: DictConfig) -> RobotConfig:
 # Reward factory
 # ---------------------------------------------------------------------------
 
-def make_rewards(reward_list: list[DictConfig]) -> tuple[RewardComponent, ...]:
-    """Build reward components from a list of reward spec nodes.
+def make_rewards(cfg: DictConfig) -> tuple[RewardComponent, ...]:
+    """Build reward components from a dict of reward spec nodes keyed by component type.
 
     Args:
-        reward_list: List of ``{type: ..., weight: ..., ...}`` nodes, typically
-                     from ``cfg.rewards`` (the reward config group root key).
+        cfg: Dict of ``{TypeName: {weight: ..., ...}}`` nodes, typically
+             from ``cfg.rewards`` (the reward config group root key).
 
     Returns:
         Tuple of instantiated :class:`~robo_gym.env.reward.RewardComponent` objects.
     """
     components = []
-    for c in reward_list:
-        c_dict: dict[str, Any] = {k: v for k, v in OmegaConf.to_container(c, resolve=True).items()}  # type: ignore[union-attr]
-        components.append(_REWARD_MAP[c_dict["type"]](**{k: v for k, v in c_dict.items() if k != "type"}))
+    for type_name, c in cfg.items():
+        c_dict: dict[str, Any] = OmegaConf.to_container(c, resolve=True)  # type: ignore[assignment]
+        components.append(_REWARD_MAP[type_name](**c_dict))
     return tuple(components)
 
 
