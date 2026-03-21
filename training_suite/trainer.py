@@ -4,6 +4,7 @@ import wandb
 
 from omegaconf import OmegaConf, DictConfig
 from pathlib import Path
+from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
 from stable_baselines3.common.callbacks import CallbackList
@@ -14,6 +15,24 @@ from .checkpoint import save_checkpoint, load_checkpoint
 from .callbacks import CheckpointCallback, MazeEvalCallback, UploadModelCallback, TrainingMetricsCallback
 
 logger = logging.getLogger(__name__)
+
+
+def branch_model(model: PPO, artifact_path: Path, keep: list[str]):
+    zipfile = next(artifact_path.glob("*.zip"))
+    logger.info("Artifact zipfile found: %s", zipfile)
+
+    old_model = PPO.load(zipfile)
+    old_params = old_model.policy.state_dict()
+
+    new_params = model.policy.state_dict()
+    for key in old_params:
+        if any([k in key for k in keep]):
+            logger.info("Using '%s for model branching", key)
+            new_params[key] = old_params[key]
+        else:
+            logger.info("Ignoring '%s' for model branching", key)
+    model.policy.load_state_dict(new_params)
+    
 
 
 def train(cfg: DictConfig, run_id=None, checkpoint: Path | None = None):
@@ -59,10 +78,10 @@ def train(cfg: DictConfig, run_id=None, checkpoint: Path | None = None):
         logger.info("🚩 Loading checkpoint '%s'", checkpoint)
         model, start_step = load_checkpoint(checkpoint, model, cfg)
     elif cfg.training.get("init_from"):
-        logger.info("💫 Initialize model from artifact '%s'", cfg.init_from)
-        artifact = run.use_artifact(cfg.init_from)
-        artifact_path = artifact.download()
-        model.set_parameters(artifact_path)
+        logger.info("💫 Initialize model from artifact '%s'", cfg.training.init_from.artifact)
+        artifact = run.use_artifact(cfg.training.init_from.artifact)
+        artifact_path = Path(artifact.download()).resolve()
+        branch_model(model, artifact_path, keep=cfg.training.init_from.keeplist)
 
 
     total_timesteps = cfg.training.total_timesteps
