@@ -1,4 +1,4 @@
-"""Tests for SubStepWrapper, RenderWrapper, and RealtimeWrapper."""
+"""Tests for SubStepWrapper, RenderWrapper, RealtimeWrapper, and LinearAngularActionWrapper."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from robo_gym.env.maze_env import MazeEnv
-from robo_gym.env.wrappers import RealtimeWrapper, RenderWrapper, SubStepWrapper
+from robo_gym.env.wrappers import LinearAngularActionWrapper, RealtimeWrapper, RenderWrapper, SubStepWrapper
 from robo_gym.env.reward import ActionSmoothReward, ExploreReward, VelocityReward
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.robot import RobotConfig
@@ -204,6 +204,44 @@ class TestComposition:
         len_after_1 = len(base._trajectory)
         env.step(_ZERO)
         assert len(base._trajectory) > len_after_1
+
+
+# ---------------------------------------------------------------------------
+# LinearAngularActionWrapper
+# ---------------------------------------------------------------------------
+
+class TestLinearAngularActionWrapper:
+    def test_full_forward_maps_to_both_wheels_max(self) -> None:
+        """[1, 0] (full forward, no turn) must produce [1, 1]."""
+        wrapper = LinearAngularActionWrapper(_base_env())
+        result = wrapper.action(np.array([1.0, 0.0], dtype=np.float32))
+        np.testing.assert_array_almost_equal(result, [1.0, 1.0])
+
+    def test_spin_right_maps_to_opposite_wheels(self) -> None:
+        """[0, 1] (no forward, max clockwise) must produce [-1, 1]."""
+        wrapper = LinearAngularActionWrapper(_base_env())
+        result = wrapper.action(np.array([0.0, 1.0], dtype=np.float32))
+        np.testing.assert_array_almost_equal(result, [-1.0, 1.0])
+
+    def test_forward_and_full_turn_clips_left_wheel(self) -> None:
+        """[1, 1] must produce [0, 1] with left wheel clipped."""
+        wrapper = LinearAngularActionWrapper(_base_env())
+        result = wrapper.action(np.array([1.0, 1.0], dtype=np.float32))
+        np.testing.assert_array_almost_equal(result, [0.0, 1.0])
+
+    def test_action_space_shape_and_bounds(self) -> None:
+        """Action space must be Box(2,) with bounds [-1, 1]."""
+        wrapper = LinearAngularActionWrapper(_base_env())
+        space = wrapper.action_space
+        assert space.shape == (2,)
+        assert space.low[0] == pytest.approx(-1.0)
+        assert space.high[0] == pytest.approx(1.0)
+
+    def test_zero_action_passes_through_unchanged(self) -> None:
+        """[0, 0] must produce [0, 0]."""
+        wrapper = LinearAngularActionWrapper(_base_env())
+        result = wrapper.action(np.array([0.0, 0.0], dtype=np.float32))
+        np.testing.assert_array_almost_equal(result, [0.0, 0.0])
 
 
 # ---------------------------------------------------------------------------

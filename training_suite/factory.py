@@ -14,7 +14,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
 from robo_gym.env import MazeEnv, SubStepWrapper
-from robo_gym.env.wrappers import LastActionWrapper, SensorNormalizationWrapper
+from robo_gym.env.wrappers import LastActionWrapper, LinearAngularActionWrapper, SensorNormalizationWrapper
 from .metrics import EPISODE_KEYS
 from robo_gym.env.reward import (
     ActionSmoothReward,
@@ -80,6 +80,7 @@ def _validate_temporal_compat(cfg: DictConfig) -> None:
 _WRAPPER_MAP: dict[str, type] = {
     "SensorNormalizationWrapper": SensorNormalizationWrapper,
     "LastActionWrapper": LastActionWrapper,
+    "LinearAngularActionWrapper": LinearAngularActionWrapper,
     "FrameStackObservation": gym.wrappers.FrameStackObservation,
 }
 
