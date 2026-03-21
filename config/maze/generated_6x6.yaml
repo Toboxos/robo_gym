@@ -11,8 +11,10 @@ sim_dt: 0.005 # [s]
 # time between agent steps
 agent_dt: 0.01
 
-# maximum run time of the simulation
-max_time: 10 # [s]
+# rolling progress window: episode ends when no new tile is found within patience
+# patience = base_patience + patience_scale * tiles_visited  (both in seconds)
+base_patience: 7.0   # [s] patience with 0 tiles visited
+patience_scale: 1.0  # [s] extra patience per tile visited
 
 # randomise robot spawn position and heading each episode
 random_start: true

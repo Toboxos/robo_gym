@@ -8,18 +8,16 @@ import numpy as np
 import pytest
 
 from robo_gym.env.maze_env import MazeEnv
-from robo_gym.env.realtime_wrapper import RealtimeWrapper
-from robo_gym.env.render_wrapper import RenderWrapper
+from robo_gym.env.wrappers import RealtimeWrapper, RenderWrapper, SubStepWrapper
 from robo_gym.env.reward import ActionSmoothReward, ExploreReward, VelocityReward
-from robo_gym.env.substep_wrapper import SubStepWrapper
 from robo_gym.maze.maze import Maze
 from robo_gym.sim_core.robot import RobotConfig
 
 _ZERO = np.zeros(2, dtype=np.float32)
 
 
-def _base_env(dt: float = 0.01, max_steps: int | None = None) -> MazeEnv:
-    return MazeEnv(RobotConfig(), Maze.blank(3, 3), 0.3, dt=dt, max_steps=max_steps)
+def _base_env(dt: float = 0.01, base_patience: int = 100000, patience_scale: int = 0) -> MazeEnv:
+    return MazeEnv(RobotConfig(), Maze.blank(3, 3), 0.3, dt=dt, base_patience=base_patience, patience_scale=patience_scale)
 
 
 # ---------------------------------------------------------------------------
@@ -55,16 +53,17 @@ class TestSubStepWrapperSubsteps:
 
 class TestSubStepWrapperTruncation:
     def test_truncation_propagates_early(self) -> None:
-        """If inner env truncates at step 3, wrapper must stop and return truncated=True."""
-        env = SubStepWrapper(_base_env(dt=0.01, max_steps=3), control_dt=0.10)
+        """If inner env truncates at substep 3, wrapper must stop and return truncated=True."""
+        # base_patience=2, patience_scale=0: truncates when steps_since_new_tile > 2 (after 3 idle steps)
+        env = SubStepWrapper(_base_env(dt=0.01, base_patience=2, patience_scale=0), control_dt=0.10)
         env.reset()
         _, _, _, truncated, _ = env.step(_ZERO)
         assert truncated
         assert env.last_n_substeps == 3
 
     def test_no_truncation_within_budget(self) -> None:
-        """No truncation when max_steps is well beyond a single control step."""
-        env = SubStepWrapper(_base_env(dt=0.01, max_steps=1000), control_dt=0.10)
+        """No truncation when patience is well beyond a single control step."""
+        env = SubStepWrapper(_base_env(dt=0.01, base_patience=100000, patience_scale=0), control_dt=0.10)
         env.reset()
         _, _, _, truncated, _ = env.step(_ZERO)
         assert not truncated

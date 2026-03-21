@@ -65,7 +65,8 @@ class MazeEnv(gymnasium.Env):
         maze: Maze,
         cell_size: float,
         dt: float = 0.05,
-        max_steps: int | None = None,
+        base_patience: int = 999999,
+        patience_scale: int = 100,
         rng_seed: int | None = None,
         render_mode: str | None = None,
         renderer_config: Any | None = None,
@@ -80,7 +81,11 @@ class MazeEnv(gymnasium.Env):
             maze:               Maze defining the world geometry and start pose.
             cell_size:          Side length of one maze cell in metres.
             dt:                 Simulation tick duration in seconds.
-            max_steps:          Episode length limit.  ``None`` means no limit.
+            base_patience:      Minimum physics steps allowed without discovering a new
+                                tile before the episode is truncated.
+            patience_scale:     Additional physics steps of patience granted per tile
+                                already visited.  Together with ``base_patience`` this
+                                gives ``patience = base_patience + patience_scale * tiles_visited``.
             rng_seed:           Seed for the sensor noise RNG.  Pass an integer for
                                 reproducible episodes; ``None`` uses OS entropy.
             render_mode:        ``"human"`` for a live PyGame window, ``"rgb_array"``
@@ -117,7 +122,8 @@ class MazeEnv(gymnasium.Env):
         self._cell_size = cell_size
         self._maze_factory = maze_factory
         self._dt = dt
-        self._max_steps = max_steps
+        self._base_patience = base_patience
+        self._patience_scale = patience_scale
         self.render_mode = render_mode
         self._renderer_config = renderer_config
         self._renderer: Any | None = None
@@ -165,6 +171,7 @@ class MazeEnv(gymnasium.Env):
         # Episode state — initialised properly in reset().
         self._state: RobotState = RobotState()
         self._step_count: int = 0
+        self._steps_since_new_tile: int = 0
         self._trajectory: list[tuple[float, float]] = []
         self._visited_cells: set[tuple[int, int]] = set()
         self._prev_action: np.ndarray = np.zeros(2, dtype=np.float32)
@@ -209,6 +216,7 @@ class MazeEnv(gymnasium.Env):
         else:
             self._state = self._initial_state()
         self._step_count = 0
+        self._steps_since_new_tile = 0
         self._trajectory.clear()
         self._trajectory.append((self._state.x, self._state.y))
         self._visited_cells = {self._current_cell()}
@@ -245,12 +253,14 @@ class MazeEnv(gymnasium.Env):
         if self._engine.last_collisions:
             self._collision_count += 1
 
-        terminated = False
-        truncated = (
-            self._max_steps is not None and self._step_count >= self._max_steps
-        )
+        terminated = len(self._visited_cells) == self._walkable_cells
 
-        if truncated:
+        # Truncate run when out of patience
+        patience = self._base_patience + self._patience_scale * len(self._visited_cells)
+        truncated = self._steps_since_new_tile > patience
+        reward_info["patience"] = patience - self._steps_since_new_tile
+
+        if truncated or terminated:
             reward_info["cells_visited_count"] = len(self._visited_cells)
             reward_info["collision_count"] = self._collision_count
             reward_info["walkable_cells"] = self._walkable_cells
@@ -336,6 +346,9 @@ class MazeEnv(gymnasium.Env):
         is_new_cell = cell not in self._visited_cells
         if is_new_cell:
             self._visited_cells.add(cell)
+            self._steps_since_new_tile = 0
+        else:
+            self._steps_since_new_tile += 1
 
         ctx = RewardContext(
             state=self._state,

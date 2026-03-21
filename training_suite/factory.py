@@ -22,6 +22,7 @@ from robo_gym.env.reward import (
     RewardComponent,
     VelocityReward,
     WallCollisionPenalty,
+    StepReward
 )
 from robo_gym.maze import Maze
 from robo_gym.maze.generator import generate_dfs, generate_prims
@@ -92,6 +93,7 @@ _REWARD_MAP: dict[str, type] = {
     "ExploreReward": ExploreReward,
     "ActionSmoothReward": ActionSmoothReward,
     "WallCollisionPenalty": WallCollisionPenalty,
+    "StepReward": StepReward,
 }
 
 
@@ -197,7 +199,8 @@ def make_env(
         robot_config=robot_config,
         cell_size=cfg.maze.cell_size,
         dt=cfg.maze.sim_dt,
-        max_steps=int(cfg.maze.max_time / cfg.maze.sim_dt),
+        base_patience=int(cfg.maze.base_patience / cfg.maze.sim_dt),
+        patience_scale=int(cfg.maze.patience_scale / cfg.maze.sim_dt),
         rng_seed=seed,
         reward_components=reward_components,
         render_mode=render_mode,
@@ -265,5 +268,7 @@ def make_model(cfg: DictConfig, env: gym.Env | VecEnv, seed: int, **kwargs) -> P
         verbose=1,
         seed=seed,
         device=cfg.get("device", "cpu"),
+        use_sde=cfg.get("use_sde", False),
+        ent_coef=cfg.get("ent_coef", 0.0),
         **kwargs,
     )

@@ -135,3 +135,13 @@ class WallCollisionPenalty:
     def __call__(self, ctx: RewardContext) -> tuple[float, str]:
         """Return ``-1.0`` on a collision step, ``0.0`` otherwise."""
         return (-1.0 if ctx.has_collision else 0.0), "r_wall_collision"
+
+
+@dataclass(frozen=True)
+class StepReward:
+    """Fixed reward of 1 each step. The weight can be used to manipulate if reward or penalty."""
+
+    weight: float = 1.0
+
+    def __call__(self, ctx: RewardContext) -> tuple[float, str]:
+        return 1.0, "step"

@@ -45,7 +45,6 @@ def _us(name: str = "front", max_range: float = _US_MAX_RANGE) -> UltrasonicSens
 def _env(
     sensors: tuple = (),
     start_heading: str = "E",
-    max_steps: int | None = None,
     rng_seed: int | None = 0,
 ) -> MazeEnv:
     """Convenience factory for tests."""
@@ -53,7 +52,6 @@ def _env(
         robot_config=RobotConfig(sensors=sensors),
         maze=_blank_maze(start_heading),
         cell_size=_CELL_SIZE,
-        max_steps=max_steps,
         rng_seed=rng_seed,
     )
 
@@ -129,7 +127,7 @@ class TestReset:
 
     def test_reset_step_count_is_zero(self) -> None:
         """Step count is 0 immediately after reset()."""
-        env = _env(max_steps=5)
+        env = _env()
         env.reset()
         assert env._step_count == 0
 
@@ -166,7 +164,7 @@ class TestStep:
 
     def test_terminated_always_false(self) -> None:
         """terminated flag is never set (no goal states implemented yet)."""
-        env = _env(sensors=(_us(),), max_steps=20)
+        env = _env(sensors=(_us(),))
         env.reset()
         for _ in range(10):
             _, _, terminated, _, _ = env.step(env.action_space.sample())
@@ -174,30 +172,62 @@ class TestStep:
 
 
 # ---------------------------------------------------------------------------
-# Truncation / max_steps
+# Truncation — rolling patience window
 # ---------------------------------------------------------------------------
 
 class TestTruncation:
-    def test_truncated_on_final_step(self) -> None:
-        """truncated becomes True exactly when step_count reaches max_steps."""
-        env = _env(max_steps=3)
+    def test_truncated_when_patience_exhausted(self) -> None:
+        """Episode truncates after base_patience steps with no new tile discovered."""
+        # base_patience=2, patience_scale=0 → truncate when steps_since_new_tile > 2
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=_blank_maze(),
+            cell_size=_CELL_SIZE,
+            base_patience=2,
+            patience_scale=0,
+        )
         env.reset()
         action = np.zeros(2, dtype=np.float32)
-        _, _, _, truncated, _ = env.step(action)
+        _, _, _, truncated, _ = env.step(action)  # steps_since_new_tile=1
         assert truncated is False
-        _, _, _, truncated, _ = env.step(action)
+        _, _, _, truncated, _ = env.step(action)  # steps_since_new_tile=2
         assert truncated is False
-        _, _, _, truncated, _ = env.step(action)
+        _, _, _, truncated, _ = env.step(action)  # steps_since_new_tile=3 > 2
         assert truncated is True
 
-    def test_no_max_steps_never_truncates(self) -> None:
-        """With max_steps=None, truncated is never True."""
-        env = _env(max_steps=None)
+    def test_patience_resets_on_new_tile(self) -> None:
+        """Discovering a new tile resets steps_since_new_tile to 0."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=_blank_maze(),
+            cell_size=_CELL_SIZE,
+            base_patience=2,
+            patience_scale=0,
+        )
         env.reset()
-        action = np.zeros(2, dtype=np.float32)
-        for _ in range(50):
-            _, _, _, truncated, _ = env.step(action)
-            assert truncated is False
+        # Drive forward to enter a new cell, which should reset the counter.
+        env.step(np.array([1.0, 1.0], dtype=np.float32))
+        env.step(np.array([1.0, 1.0], dtype=np.float32))
+        # As long as a new cell was visited at some point, counter was reset.
+        assert env._steps_since_new_tile < 3
+
+    def test_patience_grows_with_tiles_visited(self) -> None:
+        """patience = base_patience + patience_scale * tiles_visited."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=_blank_maze(),
+            cell_size=_CELL_SIZE,
+            base_patience=10,
+            patience_scale=5,
+        )
+        env.reset()
+        # Starting cell counts as 1 visited tile.
+        tiles = len(env._visited_cells)
+        expected_patience = 10 + 5 * tiles
+        # Drive a no-op step so we can check internal state.
+        env.step(np.zeros(2, dtype=np.float32))
+        patience = env._base_patience + env._patience_scale * len(env._visited_cells)
+        assert patience == expected_patience
 
 
 # ---------------------------------------------------------------------------
@@ -536,19 +566,20 @@ class TestMazeFactory:
 # ---------------------------------------------------------------------------
 
 class TestEpisodeMetrics:
-    def _env_with_limit(self, max_steps: int) -> MazeEnv:
-        """Blank 3×3 env that truncates after max_steps physics ticks."""
+    def _env_truncates_immediately(self) -> MazeEnv:
+        """Blank 3×3 env that truncates on the first step with no new tile."""
         return MazeEnv(
             robot_config=RobotConfig(),
             maze=Maze.blank(3, 3),
             cell_size=_CELL_SIZE,
             dt=0.01,
-            max_steps=max_steps,
+            base_patience=0,
+            patience_scale=0,
         )
 
     def test_metrics_present_at_truncation(self) -> None:
         """Expected episode metrics must appear in info on the terminal step."""
-        env = self._env_with_limit(max_steps=1)
+        env = self._env_truncates_immediately()
         env.reset()
         _, _, _, truncated, info = env.step(np.zeros(2, dtype=np.float32))
         assert truncated
@@ -557,8 +588,15 @@ class TestEpisodeMetrics:
         assert "walkable_cells" in info
 
     def test_metrics_absent_mid_episode(self) -> None:
-        """Episode metrics must NOT appear in info before the terminal step."""
-        env = self._env_with_limit(max_steps=5)
+        """Episode metrics must NOT appear in info before truncation."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(3, 3),
+            cell_size=_CELL_SIZE,
+            dt=0.01,
+            base_patience=10,
+            patience_scale=0,
+        )
         env.reset()
         for _ in range(4):
             _, _, _, truncated, info = env.step(np.zeros(2, dtype=np.float32))
@@ -568,7 +606,7 @@ class TestEpisodeMetrics:
     def test_walkable_cells_matches_maze(self) -> None:
         """walkable_cells must equal the number of non-BLACK_TILE cells in the maze."""
         from robo_gym.maze.cell import TileType
-        env = self._env_with_limit(max_steps=1)
+        env = self._env_truncates_immediately()
         env.reset()
         _, _, _, _, info = env.step(np.zeros(2, dtype=np.float32))
         expected = sum(1 for c in env._maze.cells.values() if c.tile_type != TileType.BLACK_TILE)
@@ -576,7 +614,7 @@ class TestEpisodeMetrics:
 
     def test_collision_count_resets_on_reset(self) -> None:
         """_collision_count must be 0 after reset()."""
-        env = self._env_with_limit(max_steps=1)
+        env = self._env_truncates_immediately()
         env.reset()
         env.step(np.zeros(2, dtype=np.float32))
         env.reset()
