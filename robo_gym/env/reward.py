@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 
+from robo_gym.maze.right_hand import compute_right_hand_path
+
 if TYPE_CHECKING:
+    from robo_gym.maze.maze import Maze
     from robo_gym.sim_core.robot import RobotConfig, RobotState
 
 
@@ -40,6 +43,12 @@ class RewardContext:
 
     robot_config: RobotConfig
     """Full robot configuration, including drivetrain and sensors."""
+
+    maze: Maze
+    """Current maze — needed by path-following reward components."""
+
+    cell_size: float
+    """Side length of one maze cell in metres."""
 
 
 @runtime_checkable
@@ -145,3 +154,77 @@ class StepReward:
 
     def __call__(self, ctx: RewardContext) -> tuple[float, str]:
         return 1.0, "step"
+
+
+@dataclass
+class RightHandReward:
+    """Progress reward guiding the robot along the right-hand path through the maze.
+
+    Two signals are combined into a single ``r_right_hand`` info key:
+
+    * **Pulse** (``pulse_reward``): emitted once when the robot arrives within
+      ``arrival_radius`` metres of the active checkpoint.  The checkpoint is
+      then popped from the queue and the next one becomes active.
+    * **Distance progress**: ``min(prev_min_dist, cell_size) - dist``, emitted
+      only when the robot achieves a new closest approach to the active
+      checkpoint.  The reference is capped at one cell width so the scale
+      stays consistent regardless of how far away the robot was when the
+      checkpoint became active.  Returns ``0`` on every step that does not
+      set a new minimum — this naturally prevents reward farming.
+
+    The path is computed lazily on the first call after each episode reset, so
+    it adapts automatically when ``maze_factory`` generates a new maze.
+    """
+
+    weight: float = 1.0
+    arrival_radius: float = 0.12
+    """Metres; robot is considered to have reached the checkpoint within this radius."""
+    pulse_reward: float = 10.0
+    """Raw reward emitted on checkpoint arrival (scaled by ``weight`` like all others)."""
+
+    # Mutable episode state — not part of the init signature.
+    _path: list[tuple[float, float]] = field(default_factory=list, init=False, repr=False)
+    _path_idx: int = field(default=0, init=False, repr=False)
+    _min_dist: float = field(default=math.inf, init=False, repr=False)
+    _needs_reset: bool = field(default=True, init=False, repr=False)
+
+    def reset(self) -> None:
+        """Mark the path as stale so it is recomputed on the next step call."""
+        self._needs_reset = True
+
+    def __call__(self, ctx: RewardContext) -> tuple[float, str]:
+        """Compute the right-hand progress reward for one physics step."""
+        # Lazy-initialise (or re-initialise) the checkpoint queue.
+        if self._needs_reset:
+            self._path = compute_right_hand_path(ctx.maze, ctx.cell_size)
+            self._path_idx = 0
+            self._min_dist = math.inf
+            self._needs_reset = False
+
+        # Path exhausted — full loop completed this episode.
+        if self._path_idx >= len(self._path):
+            return 0.0, "r_right_hand"
+
+        tx, ty = self._path[self._path_idx]
+        dx = tx - ctx.state.x
+        dy = ty - ctx.state.y
+        dist = math.hypot(dx, dy)
+
+        # ── Arrival pulse ────────────────────────────────────────────────
+        if dist < self.arrival_radius:
+            self._path_idx += 1
+            self._min_dist = math.inf
+            return self.pulse_reward, "r_right_hand"
+
+        # ── Distance progress (high-water mark) ─────────────────────────
+        if dist < self._min_dist:
+            covered = min(self._min_dist, ctx.cell_size) - dist
+            self._min_dist = dist
+            return covered, "r_right_hand"
+
+        return 0.0, "r_right_hand"
+
+    def terminal_info(self) -> dict[str, float]:
+        """Fraction of right-hand-rule checkpoints reached this episode (0–1)."""
+        total = len(self._path)
+        return {"path_progress": self._path_idx / total if total else 0.0}

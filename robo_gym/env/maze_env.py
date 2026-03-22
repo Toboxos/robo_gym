@@ -176,6 +176,7 @@ class MazeEnv(gymnasium.Env):
         self._visited_cells: set[tuple[int, int]] = set()
         self._prev_action: np.ndarray = np.zeros(2, dtype=np.float32)
         self._collision_count: int = 0
+        self._has_left_start: bool = False
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -222,6 +223,11 @@ class MazeEnv(gymnasium.Env):
         self._visited_cells = {self._current_cell()}
         self._prev_action = np.zeros(2, dtype=np.float32)
         self._collision_count = 0
+        self._has_left_start = False
+
+        for component in self._reward_components:
+            if hasattr(component, "reset"):
+                component.reset()
 
         return self._get_obs(), {}
 
@@ -253,7 +259,18 @@ class MazeEnv(gymnasium.Env):
         if self._engine.last_collisions:
             self._collision_count += 1
 
-        terminated = len(self._visited_cells) == self._walkable_cells
+        # Track whether the robot has ever left the start cell.
+        current_cell = self._current_cell()
+        if not self._has_left_start and current_cell != self._maze.start:
+            self._has_left_start = True
+
+        # Episode completes when the robot closes the loop: all cells have been
+        # discovered and the robot returns to the start cell.
+        terminated = (
+            self._has_left_start
+            and current_cell == self._maze.start
+            and len(self._visited_cells) == self._walkable_cells
+        )
 
         # Truncate run when out of patience
         patience = self._base_patience + self._patience_scale * len(self._visited_cells)
@@ -265,6 +282,10 @@ class MazeEnv(gymnasium.Env):
             reward_info["collision_count"] = self._collision_count
             reward_info["walkable_cells"] = self._walkable_cells
             reward_info["distance_traveled"] = self._compute_distance_traveled()
+            reward_info["loop_closed"] = int(terminated)
+            for component in self._reward_components:
+                if hasattr(component, "terminal_info"):
+                    reward_info.update(component.terminal_info())
 
         return obs, reward, terminated, truncated, reward_info
 
@@ -358,6 +379,8 @@ class MazeEnv(gymnasium.Env):
             is_new_cell=is_new_cell,
             has_collision=bool(self._engine.last_collisions),
             robot_config=self._robot_config,
+            maze=self._maze,
+            cell_size=self._cell_size,
         )
 
         total = 0.0

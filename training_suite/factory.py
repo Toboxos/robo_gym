@@ -10,6 +10,7 @@ import numpy as np
 from gymnasium.spaces import Box as BoxSpace
 from omegaconf import DictConfig, OmegaConf
 from stable_baselines3 import PPO
+from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
@@ -20,9 +21,10 @@ from robo_gym.env.reward import (
     ActionSmoothReward,
     ExploreReward,
     RewardComponent,
+    RightHandReward,
     VelocityReward,
     WallCollisionPenalty,
-    StepReward
+    StepReward,
 )
 from robo_gym.maze import Maze
 from robo_gym.maze.generator import generate_dfs, generate_prims
@@ -95,6 +97,7 @@ _REWARD_MAP: dict[str, type] = {
     "ActionSmoothReward": ActionSmoothReward,
     "WallCollisionPenalty": WallCollisionPenalty,
     "StepReward": StepReward,
+    "RightHandReward": RightHandReward,
 }
 
 
@@ -238,7 +241,7 @@ def make_env(
 # Model factory
 # ---------------------------------------------------------------------------
 
-def make_model(cfg: DictConfig, env: gym.Env | VecEnv, seed: int, **kwargs) -> PPO:
+def make_model(cfg: DictConfig, env: gym.Env | VecEnv, seed: int, **kwargs) -> OnPolicyAlgorithm:
     """Build a PPO model from a model config group node.
 
     Args:

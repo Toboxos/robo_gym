@@ -7,4 +7,6 @@ EPISODE_KEYS: tuple[str, ...] = (
     "collision_count",
     "walkable_cells",
     "distance_traveled",
+    "loop_closed",    # 1.0 if full loop completed (terminated), 0.0 otherwise
+    "path_progress",  # fraction of right-hand-rule checkpoints reached (0–1)
 )

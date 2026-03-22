@@ -162,13 +162,102 @@ class TestStep:
         _, reward, _, _, _ = env.step(np.zeros(2, dtype=np.float32))
         assert isinstance(reward, float)
 
-    def test_terminated_always_false(self) -> None:
-        """terminated flag is never set (no goal states implemented yet)."""
+    def test_terminated_false_mid_episode(self) -> None:
+        """terminated must be False while the robot is still exploring."""
         env = _env(sensors=(_us(),))
         env.reset()
         for _ in range(10):
-            _, _, terminated, _, _ = env.step(env.action_space.sample())
+            _, _, terminated, _, _ = env.step(np.zeros(2, dtype=np.float32))
             assert terminated is False
+
+
+# ---------------------------------------------------------------------------
+# Termination — loop-close condition
+# ---------------------------------------------------------------------------
+
+class TestLoopCloseTermination:
+    """Episode terminates when all cells are visited AND robot returns to start."""
+
+    @staticmethod
+    def _hallway_env() -> MazeEnv:
+        """2-cell hallway; easy to drive through and back."""
+        return MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(2, 1, start=(0, 0), start_heading="E"),
+            cell_size=_CELL_SIZE,
+        )
+
+    def test_terminated_false_before_returning_to_start(self) -> None:
+        """terminated must be False while robot is in the non-start cell,
+        even if it has visited all cells."""
+        env = self._hallway_env()
+        env.reset()
+        forward = np.array([1.0, 1.0], dtype=np.float32)
+        reached_far_cell = False
+        for _ in range(50):
+            _, _, terminated, _, _ = env.step(forward)
+            if env._current_cell() == (1, 0):
+                reached_far_cell = True
+                assert not terminated, "must not terminate while at far cell"
+                break
+        assert reached_far_cell, "robot never reached cell (1,0)"
+
+    def test_loop_close_terminates_episode(self) -> None:
+        """Episode must terminate once all cells are visited and robot is back at start."""
+        env = self._hallway_env()
+        env.reset()
+        forward = np.array([1.0, 1.0], dtype=np.float32)
+        backward = np.array([-1.0, -1.0], dtype=np.float32)
+
+        # Drive forward until cell (1,0) is entered.
+        for _ in range(50):
+            env.step(forward)
+            if env._current_cell() == (1, 0):
+                break
+
+        # Drive back to start; the episode should terminate.
+        terminated = False
+        for _ in range(60):
+            _, _, terminated, truncated, _ = env.step(backward)
+            if terminated or truncated:
+                break
+
+        assert terminated, "episode must terminate when loop is closed"
+
+    def test_loop_closed_metric_is_1_on_termination(self) -> None:
+        """info['loop_closed'] must be 1 when the episode ends by closing the loop."""
+        env = self._hallway_env()
+        env.reset()
+        forward = np.array([1.0, 1.0], dtype=np.float32)
+        backward = np.array([-1.0, -1.0], dtype=np.float32)
+
+        for _ in range(50):
+            env.step(forward)
+            if env._current_cell() == (1, 0):
+                break
+
+        final_info: dict = {}
+        for _ in range(60):
+            _, _, terminated, truncated, info = env.step(backward)
+            if terminated or truncated:
+                final_info = info
+                break
+
+        assert final_info.get("loop_closed") == 1
+
+    def test_loop_closed_metric_is_0_on_truncation(self) -> None:
+        """info['loop_closed'] must be 0 when the episode ends by timeout."""
+        env = MazeEnv(
+            robot_config=RobotConfig(),
+            maze=Maze.blank(2, 1, start=(0, 0), start_heading="E"),
+            cell_size=_CELL_SIZE,
+            base_patience=0,
+            patience_scale=0,
+        )
+        env.reset()
+        _, _, terminated, truncated, info = env.step(np.zeros(2, dtype=np.float32))
+        assert truncated and not terminated
+        assert info.get("loop_closed") == 0
 
 
 # ---------------------------------------------------------------------------
