@@ -15,7 +15,8 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import VecEnv
 
 from robo_gym.env import MazeEnv, SubStepWrapper
-from robo_gym.env.wrappers import LastActionWrapper, LinearAngularActionWrapper, SensorNormalizationWrapper
+from robo_gym.env.wrappers import JunctionDoneWrapper, LastActionWrapper, LinearAngularActionWrapper, SensorNormalizationWrapper
+from robo_gym.maze.micro_generator import MicroMazeFactory
 from .metrics import EPISODE_KEYS
 from robo_gym.env.reward import (
     ActionSmoothReward,
@@ -188,15 +189,27 @@ def make_env(
     reward_components = list(make_rewards(cfg.rewards))
 
     # Build maze and optional per-episode factory.
+    maze_factory: Optional[Callable[[int], Maze]] = None
     if "generator" in cfg.maze:
         gen_cfg = cfg.maze.generator
-        gen_fn = _GENERATORS[gen_cfg.algorithm]
-        width, height = gen_cfg.width, gen_cfg.height
-        initial_maze = gen_fn(width, height, seed)
-        maze_factory: Optional[Callable[[int], Maze]] = lambda s: gen_fn(width, height, s)
+        if gen_cfg.algorithm == "micro":
+            weights: dict[str, float] = dict(
+                OmegaConf.to_container(gen_cfg.weights, resolve=True)  # type: ignore[arg-type]
+            )
+            micro_factory = MicroMazeFactory(
+                weights=weights,
+                approach_length_min=int(gen_cfg.get("approach_length_min", 1)),
+                approach_length_max=int(gen_cfg.get("approach_length_max", 4)),
+            )
+            initial_maze = micro_factory(seed)
+            maze_factory = micro_factory
+        else:
+            gen_fn = _GENERATORS[gen_cfg.algorithm]
+            width, height = gen_cfg.width, gen_cfg.height
+            initial_maze = gen_fn(width, height, seed)
+            maze_factory = lambda s: gen_fn(width, height, s)
     else:
         initial_maze = Maze.load_json(cfg.maze.path)
-        maze_factory = None
 
     env: gym.Env = MazeEnv(
         maze=initial_maze,
@@ -214,6 +227,10 @@ def make_env(
 
     # Mandatory innermost structural wrapper.
     env = SubStepWrapper(env, control_dt=cfg.maze.agent_dt)
+
+    # For micro-maze training: terminate episode when robot enters an exit cell.
+    if isinstance(maze_factory, MicroMazeFactory):
+        env = JunctionDoneWrapper(env, factory=maze_factory)
 
     # Configurable wrappers — empty dict is a valid no-op (e.g. wrappers=minimal).
     for name, spec in cfg.wrappers.items():
@@ -265,6 +282,7 @@ def make_model(cfg: DictConfig, env: gym.Env | VecEnv, seed: int, **kwargs) -> O
         learning_rate=cfg.learning_rate,
         batch_size=cfg.batch_size,
         n_epochs=cfg.n_epochs,
+        n_steps=cfg.get("n_steps", 2048),
         gamma=cfg.gamma,
         gae_lambda=cfg.gae_lambda,
         clip_range=cfg.clip_range,

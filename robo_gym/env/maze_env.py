@@ -277,13 +277,7 @@ class MazeEnv(gymnasium.Env):
         reward_info["patience"] = patience - self._steps_since_new_tile
 
         if truncated or terminated:
-            reward_info["cells_visited_count"] = len(self._visited_cells)
-            reward_info["collision_count"] = self._collision_count
-            reward_info["walkable_cells"] = self._walkable_cells
-            reward_info["distance_traveled"] = self._compute_distance_traveled()
-            reward_info["loop_closed"] = int(terminated)
-            for component in self._reward_components:
-                reward_info.update(component.terminal_info())
+            reward_info.update(self.episode_terminal_info(terminated))
 
         return obs, reward, terminated, truncated, reward_info
 
@@ -316,6 +310,32 @@ class MazeEnv(gymnasium.Env):
         if self._renderer is not None:
             self._renderer.close()
             self._renderer = None
+
+    # ------------------------------------------------------------------
+    # Public helpers (also called by wrappers)
+    # ------------------------------------------------------------------
+
+    def episode_terminal_info(self, terminated: bool) -> dict[str, Any]:
+        """Return the episode-level info dict populated at the end of an episode.
+
+        Called by ``step()`` itself and by wrappers (e.g. ``JunctionDoneWrapper``)
+        that override the termination flag *after* ``step()`` has already returned,
+        so they can backfill the keys that ``Monitor`` expects.
+
+        Args:
+            terminated: Whether the episode ended via a goal condition (``True``)
+                        or via truncation (``False``).  Determines ``loop_closed``.
+        """
+        info: dict[str, Any] = {
+            "cells_visited_count": len(self._visited_cells),
+            "collision_count": self._collision_count,
+            "walkable_cells": self._walkable_cells,
+            "distance_traveled": self._compute_distance_traveled(),
+            "loop_closed": int(terminated),
+        }
+        for component in self._reward_components:
+            info.update(component.terminal_info())
+        return info
 
     # ------------------------------------------------------------------
     # Internals

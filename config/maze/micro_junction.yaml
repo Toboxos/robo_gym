@@ -1,0 +1,31 @@
+generator:
+  algorithm: micro
+
+  # Approach corridor length sampled uniformly from [min, max] each episode.
+  # Varying the length makes the policy invariant to forward-sensor distance cues.
+  approach_length_min: 1
+  approach_length_max: 4
+
+  # Per-junction-type sampling weights.  Set a type's weight to 0 to disable it.
+  # Weights are normalised automatically; only relative magnitudes matter.
+  weights:
+    right: 1.0
+    left: 3.0
+    straight: 1.0
+    T: 1.0
+    cross: 1.0
+    dead_end: 0.5   # set > 0 to include U-turn training
+
+cell_size: 0.3      # [m]  side length of one grid cell
+
+# Physics / control timing
+sim_dt: 0.005       # [s]  physics integration step
+agent_dt: 0.01      # [s]  control / observation period
+
+# Patience-based truncation (seconds).
+# patience = base_patience + patience_scale * tiles_visited
+# Kept short so micro-episodes abort quickly when the robot is stuck.
+base_patience: 3.0
+patience_scale: 1.0
+
+random_start: false
