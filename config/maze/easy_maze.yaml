@@ -1,0 +1,17 @@
+path: "mazes/easy_maze.json"
+
+cell_size: 0.3 # [m]
+
+# time between physic updates
+sim_dt: 0.005 # [s]
+
+# time between agent steps
+agent_dt: 0.01
+
+# rolling progress window: episode ends when no new tile is found within patience
+# patience = base_patience + patience_scale * tiles_visited  (both in seconds)
+base_patience: 3.0   # [s] patience with 0 tiles visited
+patience_scale: 1.0  # [s] extra patience per tile visited
+
+# randomise robot spawn position and heading each episode
+random_start: false

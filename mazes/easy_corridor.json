@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "width": 6,
+  "height": 1,
+  "start": [
+    0,
+    0
+  ],
+  "start_heading": "E",
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "walls": {
+        "N": true,
+        "E": false,
+        "S": true,
+        "W": true
+      },
+      "tile_type": "start"
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "walls": {
+        "N": true,
+        "E": false,
+        "S": true,
+        "W": false
+      },
+      "tile_type": "normal"
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "walls": {
+        "N": true,
+        "E": false,
+        "S": true,
+        "W": false
+      },
+      "tile_type": "normal"
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "walls": {
+        "N": true,
+        "E": false,
+        "S": true,
+        "W": false
+      },
+      "tile_type": "normal"
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "walls": {
+        "N": true,
+        "E": false,
+        "S": true,
+        "W": false
+      },
+      "tile_type": "normal"
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "walls": {
+        "N": true,
+        "E": true,
+        "S": true,
+        "W": false
+      },
+      "tile_type": "normal"
+    }
+  ]
+}
