@@ -226,8 +226,7 @@ class MazeEnv(gymnasium.Env):
         self._has_left_start = False
 
         for component in self._reward_components:
-            if hasattr(component, "reset"):
-                component.reset()
+            component.reset()
 
         return self._get_obs(), {}
 
@@ -284,8 +283,7 @@ class MazeEnv(gymnasium.Env):
             reward_info["distance_traveled"] = self._compute_distance_traveled()
             reward_info["loop_closed"] = int(terminated)
             for component in self._reward_components:
-                if hasattr(component, "terminal_info"):
-                    reward_info.update(component.terminal_info())
+                reward_info.update(component.terminal_info())
 
         return obs, reward, terminated, truncated, reward_info
 

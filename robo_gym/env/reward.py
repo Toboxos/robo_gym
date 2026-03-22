@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -51,18 +52,20 @@ class RewardContext:
     """Side length of one maze cell in metres."""
 
 
-@runtime_checkable
-class RewardComponent(Protocol):
-    """Protocol for picklable reward component callables.
+class RewardComponent(ABC):
+    """Abstract base class for all reward components.
 
-    Implement by writing a frozen ``@dataclass`` with a ``weight`` field and a
-    ``__call__`` method.  Frozen dataclasses are picklable, which is required
-    for SB3 multiprocessing (``DummyVecEnv`` / ``SubprocVecEnv``).
+    Subclass this (together with ``@dataclass`` or ``@dataclass(frozen=True)``)
+    and implement ``weight`` and ``__call__``.  Frozen dataclasses are picklable,
+    which is required for SB3 multiprocessing (``DummyVecEnv`` / ``SubprocVecEnv``).
+
+    ``reset()`` and ``terminal_info()`` have concrete defaults so stateless
+    components only need to implement the two abstract members.
 
     Example::
 
         @dataclass(frozen=True)
-        class ProgressBonus:
+        class ProgressBonus(RewardComponent):
             weight: float = 2.0
             scale: float = 1.0
 
@@ -71,11 +74,10 @@ class RewardComponent(Protocol):
                 return min(1.0, dist * self.scale), "r_progress"
     """
 
-    @property
-    def weight(self) -> float:
-        """Scalar multiplier applied to the raw component value."""
-        ...
+    weight: float
+    """Scalar multiplier applied to the raw component value."""
 
+    @abstractmethod
     def __call__(self, ctx: RewardContext) -> tuple[float, str]:
         """Compute one reward signal for a single step.
 
@@ -83,7 +85,18 @@ class RewardComponent(Protocol):
             ``(raw_value, info_key)`` where ``raw_value`` is the unweighted
             scalar and ``info_key`` is the key used in the step info dict.
         """
-        ...
+
+    def reset(self) -> None:
+        """Reset any per-episode state.  No-op for stateless components."""
+
+    def terminal_info(self) -> dict[str, float]:
+        """Return episode-level metrics to be merged into the terminal info dict.
+
+        Called once at truncation or termination.  Stateless components return
+        an empty dict; stateful components (e.g. ``RightHandReward``) override
+        this to expose internal progress counters.
+        """
+        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +104,7 @@ class RewardComponent(Protocol):
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class VelocityReward:
+class VelocityReward(RewardComponent):
     """Reward proportional to normalised forward speed in ``[0, 1]``."""
 
     weight: float = 1.0
@@ -107,7 +120,7 @@ class VelocityReward:
 
 
 @dataclass(frozen=True)
-class ExploreReward:
+class ExploreReward(RewardComponent):
     """One-time bonus of ``1.0`` the first time each maze cell is entered."""
 
     weight: float = 5.0
@@ -118,7 +131,7 @@ class ExploreReward:
 
 
 @dataclass(frozen=True)
-class ActionSmoothReward:
+class ActionSmoothReward(RewardComponent):
     """Penalty in ``[-1, 0]`` for abrupt changes between consecutive actions."""
 
     weight: float = 0.1
@@ -130,7 +143,7 @@ class ActionSmoothReward:
 
 
 @dataclass(frozen=True)
-class WallCollisionPenalty:
+class WallCollisionPenalty(RewardComponent):
     """Fixed penalty of ``-1.0`` whenever the robot physically contacts a wall.
 
     Relies on ``RewardContext.has_collision``, which is set by ``MazeEnv``
@@ -147,7 +160,7 @@ class WallCollisionPenalty:
 
 
 @dataclass(frozen=True)
-class StepReward:
+class StepReward(RewardComponent):
     """Fixed reward of 1 each step. The weight can be used to manipulate if reward or penalty."""
 
     weight: float = 1.0
@@ -157,7 +170,7 @@ class StepReward:
 
 
 @dataclass
-class RightHandReward:
+class RightHandReward(RewardComponent):
     """Progress reward guiding the robot along the right-hand path through the maze.
 
     Two signals are combined into a single ``r_right_hand`` info key:
