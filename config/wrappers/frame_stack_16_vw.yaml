@@ -1,0 +1,8 @@
+# @package _global_
+wrappers:
+  LinearAngularActionWrapper:
+  LastActionWrapper:
+  FrameStackObservation:
+    params:
+      stack_size: 16
+temporal_mode: frame_stack
