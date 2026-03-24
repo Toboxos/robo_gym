@@ -6,7 +6,7 @@ from omegaconf import OmegaConf, DictConfig
 from pathlib import Path
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.callbacks import CallbackList
 from wandb.integration.sb3 import WandbCallback
 
@@ -69,6 +69,13 @@ def train(cfg: DictConfig, run_id=None, checkpoint: Path | None = None):
         seed=cfg.seed,
         vec_env_cls=DummyVecEnv
     )
+    env = VecNormalize(
+        env, 
+        norm_obs=cfg.training.get("normalize_obs", True),
+        norm_reward=cfg.training.get("normalize_reward", True),
+        clip_obs=10.0
+    )
+
     model = make_model(cfg.model, env, cfg.seed, tensorboard_log=str(run_dir))
 
 
@@ -96,7 +103,11 @@ def train(cfg: DictConfig, run_id=None, checkpoint: Path | None = None):
         total_steps=total_timesteps
     )
     eval_cb = MazeEvalCallback(
-        eval_env=make_env(cfg, robot, seed=1234),
+        eval_env=VecNormalize(make_vec_env(
+            lambda: make_env(cfg, robot, seed=cfg.seed),
+            seed=1234,
+            vec_env_cls=DummyVecEnv
+        ), training=False, norm_reward=False),
         eval_freq=cfg.training.eval_freq // cfg.training.n_envs,
         callback_on_new_best=UploadModelCallback(
             run=run,

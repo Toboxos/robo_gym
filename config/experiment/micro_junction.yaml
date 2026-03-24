@@ -1,0 +1,37 @@
+# @package _global_
+defaults:
+  - override /robot: basic_v1
+  - override /robot: ppo
+  - override /maze: micro_junction
+  - override /wrappers: frame_stack_16_vw
+  - override /reward: null
+  - _self_
+
+training:
+  total_timesteps: 60_000_000
+  save_checkpoint_freq: 6_000_000
+  eval_freq: 1_000_000
+  n_envs: 16
+
+model:
+  learning_rate: 1e-4
+  policy_kwargs:
+    net_arch: [4, 64, 64]
+  batch_size: 512
+  ent_coef: 0.001
+  n_steps: 2048
+
+rewards:
+  RightHandReward:
+    weight: 1.0
+    arrival_radius: 0.12
+    pulse_reward: 10.0
+  WallCollisionPenalty:
+    weight: 2.0
+  StepReward:
+    weight: -0.01
+
+wrappers:
+  FrameStackObservation:
+    params:
+      stack_size: 16

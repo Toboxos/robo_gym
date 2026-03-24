@@ -4,11 +4,15 @@ import io
 import json
 import logging
 import re
+import pickle
 from pathlib import Path
 import zipfile
 
 import wandb
+from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.vec_env import VecNormalize
 from omegaconf import DictConfig, OmegaConf
+
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +27,7 @@ class ConfigMismatch(Exception):
 
 
 def save_checkpoint(
-    model,
+    model: BaseAlgorithm,
     cfg: DictConfig,
     checkpoint_dir: Path,
     step: int,
@@ -69,6 +73,9 @@ def save_checkpoint(
     with zipfile.ZipFile(buf, "a") as zf:
         zf.writestr("config.yaml", OmegaConf.to_yaml(cfg))
         zf.writestr("_metadata.json", json.dumps(meta, indent=2))
+
+        if vec_norm := model.get_vec_normalize_env():
+            zf.writestr("vec_norm.pkl", pickle.dumps(vec_norm))
 
     zip_path = checkpoint_dir / f"{label}.zip"
     zip_path.write_bytes(buf.getvalue())
@@ -132,6 +139,7 @@ def load_checkpoint(
         names = zf.namelist()
         meta: dict = json.loads(zf.read("_metadata.json")) if "_metadata.json" in names else {}
         saved_cfg = OmegaConf.create(zf.read("config.yaml").decode()) if "config.yaml" in names else None
+        saved_vec_norm: VecNormalize | None = pickle.loads(zf.read("vec_norm.pkl")) if "vec_norm.pkl" in names else None
 
     if saved_cfg is not None and saved_cfg != cfg:
         raise ConfigMismatch(
@@ -141,9 +149,16 @@ def load_checkpoint(
             "Use branch for intentional config changes, or restore the original config for crash-resume."
         )
 
-    restored = type(model).load(str(checkpoint_path), env=model.get_env())
+    restored: BaseAlgorithm = type(model).load(str(checkpoint_path), env=model.get_env())
     step = int(meta.get("step", 0))
     restored.num_timesteps = step
+
+    if saved_vec_norm:
+        vec_norm = restored.get_vec_normalize_env()
+        if vec_norm is None:
+            raise RuntimeError("Model environment expected to be wrapped in VecNormalization")
+        
+        saved_vec_norm.set_venv(vec_norm.venv)
 
     log.info("Restored checkpoint %s at step %d", checkpoint_path, step)
     return restored, step
