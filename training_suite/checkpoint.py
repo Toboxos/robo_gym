@@ -10,7 +10,7 @@ import zipfile
 
 import wandb
 from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.vec_env import VecNormalize
+from stable_baselines3.common.vec_env import VecNormalize, sync_envs_normalization
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -158,7 +158,7 @@ def load_checkpoint(
         if vec_norm is None:
             raise RuntimeError("Model environment expected to be wrapped in VecNormalization")
         
-        saved_vec_norm.set_venv(vec_norm.venv)
+        sync_envs_normalization(saved_vec_norm, vec_norm)
 
     log.info("Restored checkpoint %s at step %d", checkpoint_path, step)
     return restored, step
