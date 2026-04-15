@@ -21,12 +21,10 @@ elif command -v uv &>/dev/null; then
   UV="$(command -v uv)"
   echo "[bootstrap] Using uv from PATH: $UV" >&2
 else
-  echo "[bootstrap] Downloading uv..." >&2
-  ROBO_GYM_BASE="${ROBO_GYM_BASE:-$HOME}"
-  UV_BIN_DIR="$ROBO_GYM_BASE/.robo_gym/bin"
-  mkdir -p "$UV_BIN_DIR"
-  curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$UV_BIN_DIR" sh
-  UV="$UV_BIN_DIR/uv"
+  echo "[bootstrap] ERROR: uv not found." >&2
+  echo "[bootstrap] Place the bundled uv binary next to this script or install uv into PATH." >&2
+  echo "[bootstrap] See https://docs.astral.sh/uv/getting-started/installation/" >&2
+  exit 1
 fi
 
 ROBO_GYM_BASE="${ROBO_GYM_BASE:-$HOME}"

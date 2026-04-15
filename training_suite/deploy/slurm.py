@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import logging
 import shutil
@@ -19,10 +20,15 @@ from .templates import BOOTSTRAP_SH, JOB_SH, RUN_PY, SELF_EXTRACTING_WRAPPER
 
 log = logging.getLogger(__name__)
 
+# Pinned uv version and integrity check.
+# When upgrading, update _UV_VERSION and _UV_SHA256 together.
+# Get the hash from the release page:  https://github.com/astral-sh/uv/releases
+_UV_VERSION = "0.11.6"
 _UV_LINUX_URL = (
-    "https://github.com/astral-sh/uv/releases/latest/download/"
+    f"https://github.com/astral-sh/uv/releases/download/{_UV_VERSION}/"
     "uv-x86_64-unknown-linux-gnu.tar.gz"
 )
+_UV_SHA256: str | None = None  # Set to the hex digest from the release page to enable verification
 
 # Project root is two levels up from this file (training_suite/deploy/slurm.py)
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -121,27 +127,78 @@ def resolve_sweep_configs(
 def download_uv_binary(dest: Path) -> None:
     """Download the Linux x86_64 uv binary to *dest*.
 
+    The download URL is pinned to a specific version.  When ``_UV_SHA256``
+    is set the tarball is verified against the expected digest before any
+    content is extracted.  Tarfile members are filtered to reject path
+    traversal attacks (e.g. ``../../malicious``).
+
     Args:
         dest: Target file path (e.g. bundle_dir / "uv").
+
+    Raises:
+        RuntimeError: On checksum mismatch, missing binary, or extraction
+            failure.
     """
-    log.info("Downloading uv binary from %s", _UV_LINUX_URL)
+    log.info("Downloading uv %s from %s", _UV_VERSION, _UV_LINUX_URL)
     buf = io.BytesIO()
     with urllib.request.urlopen(_UV_LINUX_URL) as resp:
         buf.write(resp.read())
-    buf.seek(0)
+    raw_bytes = buf.getvalue()
 
+    # Integrity check — reject tampered downloads.
+    if _UV_SHA256 is not None:
+        actual = hashlib.sha256(raw_bytes).hexdigest()
+        if actual != _UV_SHA256:
+            raise RuntimeError(
+                f"SHA-256 mismatch for uv tarball.\n"
+                f"  expected: {_UV_SHA256}\n"
+                f"  got:      {actual}\n"
+                f"Update _UV_SHA256 in slurm.py if you intentionally upgraded uv."
+            )
+        log.info("SHA-256 verified: %s", actual)
+
+    buf.seek(0)
     with tarfile.open(fileobj=buf, mode="r:gz") as tar:
         for member in tar.getmembers():
-            if member.name.endswith("/uv") or member.name == "uv":
-                f = tar.extractfile(member)
-                if f is None:
-                    raise RuntimeError("Could not extract uv binary from tarball")
-                dest.write_bytes(f.read())
-                dest.chmod(dest.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-                log.info("uv binary written to %s", dest)
-                return
+            # Defence-in-depth: reject path traversal in member names.
+            if member.name != "uv" and not _is_safe_tar_member(member.name, "uv"):
+                continue
+            if not (member.name.endswith("/uv") or member.name == "uv"):
+                continue
+            f = tar.extractfile(member)
+            if f is None:
+                raise RuntimeError("Could not extract uv binary from tarball")
+            dest.write_bytes(f.read())
+            dest.chmod(dest.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+            log.info("uv binary written to %s", dest)
+            return
 
     raise RuntimeError("uv binary not found in downloaded tarball")
+
+
+def _is_safe_tar_member(name: str, expected_filename: str) -> bool:
+    """Return True if *name* is a safe tar member path for *expected_filename*.
+
+    Rejects absolute paths, parent-directory references, and names that
+    don't end with the expected filename.
+    """
+    if name.startswith("/") or name.startswith("..") or "/../" in name:
+        return False
+    # Must end with exactly the expected filename component.
+    parts = name.replace("\\", "/").split("/")
+    return parts[-1] == expected_filename
+
+
+def _tar_no_symlinks(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    """Tarfile filter that drops symlinks and hardlinks.
+
+    Prevents accidentally following symlinks that could bundle sensitive
+    files from the host filesystem.
+    """
+    if info.issym() or info.islnk():
+        log.warning("Excluding symlink/hardlink from tarball: %s", info.name)
+        return None
+    return info
 
 
 def build_wheel(project_root: Path, dist_dir: Path) -> Path:
@@ -263,7 +320,10 @@ def pack_single_file(bundle_dir: Path, cfg: DeployConfig) -> Path:
         for item in sorted(bundle_dir.iterdir()):
             if item.name == "job.sh":
                 continue
-            tar.add(item, arcname=item.name, recursive=True)
+            if item.is_symlink():
+                log.warning("Skipping symlink in bundle: %s", item)
+                continue
+            tar.add(item, arcname=item.name, recursive=True, filter=_tar_no_symlinks)
     buf.seek(0)
 
     payload = base64.b64encode(buf.read()).decode("ascii")
